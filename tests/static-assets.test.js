@@ -17,8 +17,7 @@ test('every literal DOM ID used by app.js exists in index.html', () => {
 
 test('all browser libraries are local project assets and no CDN is used', () => {
   const sources = [...html.matchAll(/<(?:script|link)[^>]+(?:src|href)="([^"]+)"/g)].map(match => match[1]);
-  assert.ok(sources.includes('/vendor/firebase-app-compat.js'));
-  assert.ok(sources.includes('/vendor/firebase-auth-compat.js'));
+  assert.ok(sources.includes('/vendor/firebase-compat.js'));
   assert.ok(sources.includes('/vendor/exceljs.min.js'));
   for (const source of sources) {
     assert.ok(source.startsWith('/'), `External source found: ${source}`);

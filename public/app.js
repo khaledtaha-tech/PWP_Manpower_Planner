@@ -168,7 +168,7 @@ async function initializeAuthentication() {
     $('loginBtn').disabled = true;
     return;
   }
-  if (!window.firebase?.initializeApp) {
+  if (!window.firebase?.initializeApp || typeof window.firebase.auth !== 'function') {
     showLogin('Firebase Authentication library could not be loaded.');
     return;
   }
