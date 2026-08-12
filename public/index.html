@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PWP Manpower Planner</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="loadingScreen" class="auth-screen">
+    <div class="auth-card auth-loading-card">
+      <div class="brand-mark">PWP</div>
+      <div class="spinner" aria-hidden="true"></div>
+      <h2>Loading Manpower Planner</h2>
+      <p>Checking secure access…</p>
+    </div>
+  </div>
+
+  <div id="loginScreen" class="auth-screen" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="brand-mark">PWP</div>
+        <div><div class="eyebrow">PWP SYSTEM</div><h1>Manpower Planner</h1></div>
+      </div>
+      <p class="auth-intro">Sign in with the account created for you by the system administrator.</p>
+      <form id="loginForm" class="auth-form">
+        <label>Email address<input id="loginEmail" type="email" autocomplete="username" required placeholder="name@company.com"></label>
+        <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••"></label>
+        <div id="loginError" class="form-message error" role="alert" hidden></div>
+        <button id="loginBtn" class="btn primary wide" type="submit"><span class="button-label">Sign In</span></button>
+      </form>
+      <div class="auth-note">Accounts cannot be created from this screen. Contact an Admin if you need access.</div>
+      <button id="loginThemeToggle" class="btn subtle theme-login" type="button">☾ Dark theme</button>
+    </div>
+  </div>
+
+  <div id="appShell" class="app-shell" hidden>
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">PWP SYSTEM</div>
+        <h1>Manpower Planner</h1>
+        <p>14-Day Production & Agency Workforce Planning</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="status-stack role-planner">
+          <span id="dbStatus" class="status-chip status-neutral">Checking database…</span>
+          <span id="saveState" class="save-state">Loading…</span>
+        </div>
+        <div id="userBadge" class="user-badge"></div>
+        <button id="themeToggle" class="btn theme-btn" title="Switch theme" aria-label="Switch theme">☾ Dark</button>
+        <button id="openPublishedBtn" class="btn ghost role-planner">Read-Only View</button>
+        <button id="saveDraftBtn" class="btn secondary role-planner">Save Draft</button>
+        <button id="publishBtn" class="btn primary role-planner">Publish Plan</button>
+        <button id="logoutBtn" class="btn ghost">Sign Out</button>
+      </div>
+    </header>
+
+    <nav id="mainNav" class="tabs">
+      <button class="tab role-planner active" data-tab="dashboard">Dashboard</button>
+      <button class="tab role-planner" data-tab="plan">14-Day Plan</button>
+      <button class="tab role-planner" data-tab="actions">Agency Action Plan</button>
+      <button class="tab" data-tab="published">Published Plan</button>
+      <button class="tab role-planner" data-tab="settings">Machines & Settings</button>
+      <button class="tab role-planner" data-tab="history">History</button>
+      <button class="tab role-admin" data-tab="admin" hidden>Admin</button>
+    </nav>
+
+    <main>
+      <section id="tab-dashboard" class="tab-panel role-planner active">
+        <div class="section-head">
+          <div><h2>Workforce Overview</h2><p id="periodLabel">—</p></div>
+          <div class="period-control"><label>Plan start date</label><input id="planStartDate" type="date"></div>
+        </div>
+        <div id="dashboardCards" class="kpi-grid"></div>
+        <div class="card">
+          <div class="card-head"><div><h3>14-Day Workforce Forecast</h3><p>Company workers are used first. Agency covers the remaining requirement.</p></div></div>
+          <div class="table-wrap"><table id="forecastTable"></table></div>
+        </div>
+      </section>
+
+      <section id="tab-plan" class="tab-panel role-planner">
+        <div class="section-head">
+          <div><h2>14-Day Production Plan</h2><p>Add sequential production periods. No shifts and no man-days.</p></div>
+          <div class="section-actions">
+            <a id="downloadTemplateBtn" class="btn secondary" href="/assets/PWP_14_Day_Plan_Upload_Template.xlsx" download>Download Excel Template</a>
+            <button id="importExcelBtn" class="btn primary" type="button">Import Excel Plan</button>
+            <button id="fillAllStoppedBtn" class="btn ghost" type="button">Fill Unplanned Days as Stopped</button>
+            <input id="excelFileInput" type="file" accept=".xlsx" hidden>
+          </div>
+        </div>
+        <div id="machinePlans" class="machine-list"></div>
+      </section>
+
+      <section id="tab-actions" class="tab-panel role-planner">
+        <div class="section-head"><div><h2>Agency Manpower Action Plan</h2><p>Requests protect production. Releases only happen after sustained surplus.</p></div></div>
+        <div id="actionSummary" class="kpi-grid"></div>
+        <div class="card"><div class="table-wrap"><table id="actionsTable"></table></div></div>
+        <div class="note-card"><strong>Floating rule:</strong> temporary surplus can be used for Crusher / support work. The planner does not request extra workers specifically for the crusher.</div>
+      </section>
+
+      <section id="tab-published" class="tab-panel"><div id="publishedContainer"></div></section>
+
+      <section id="tab-settings" class="tab-panel role-planner">
+        <div class="settings-grid">
+          <div>
+            <div class="card database-card">
+              <div class="card-head"><div><h3>Database Connection</h3><p>Shared persistence protected by Firebase Authentication.</p></div></div>
+              <div id="databasePanel" class="database-panel">Checking storage…</div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div><h3>Workforce Rules</h3><p>Editable planning parameters.</p></div></div>
+              <form id="settingsForm" class="form-grid">
+                <label>Company Workers<input id="companyWorkers" type="number" min="0"></label>
+                <label>Current Agency Workers<input id="currentAgency" type="number" min="0"></label>
+                <label>Request Notice (days)<input id="requestNoticeDays" type="number" min="0" max="30"></label>
+                <label>Release Notice (days)<input id="releaseNoticeDays" type="number" min="0" max="30"></label>
+                <label>Allowed Floating Surplus<input id="floatingLimit" type="number" min="0"></label>
+                <label>Minimum Release Duration<input id="minReleaseDuration" type="number" min="1" max="14"></label>
+                <div class="form-actions"><button class="btn primary" type="submit">Save Settings</button></div>
+              </form>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Machines</h3><p>Crusher is intentionally not a normal production line.</p></div><button id="addMachineBtn" class="btn secondary">+ Add Machine</button></div>
+            <div class="table-wrap"><table id="machinesTable"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-history" class="tab-panel role-planner">
+        <div class="section-head"><div><h2>Published Plan History</h2><p>Every publish creates a permanent snapshot in this app.</p></div></div>
+        <div class="card"><div class="table-wrap"><table id="historyTable"></table></div></div>
+      </section>
+
+      <section id="tab-admin" class="tab-panel role-admin" hidden>
+        <div class="section-head">
+          <div><h2>User Administration</h2><p>Create accounts, assign roles, and enable or disable access.</p></div>
+          <button id="addUserBtn" class="btn primary" type="button">+ Create User</button>
+        </div>
+        <div class="security-note"><strong>Secure role control:</strong> users cannot register themselves or promote themselves. Role changes are stored as Firebase Custom Claims and active tokens are revoked.</div>
+        <div class="card"><div class="table-wrap"><table id="usersTable"></table></div></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="periodDialog">
+    <form method="dialog" id="periodForm" class="dialog-form">
+      <div class="dialog-head"><div><div class="eyebrow">PLAN PERIOD</div><h3 id="periodDialogTitle">Add Period</h3></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
+      <input id="periodMachineId" type="hidden"><input id="periodIndex" type="hidden">
+      <label>Type<select id="periodKind"><option value="run">Production Run</option><option value="stopped">Stopped</option></select></label>
+      <label id="productLabel">Product<input id="periodProduct" type="text" placeholder="e.g. 50 mm HDPE"></label>
+      <label>Duration (days)<input id="periodDays" type="number" min="1" max="14" value="1"></label>
+      <label id="workersLabel">Workers required / day<input id="periodWorkers" type="number" min="0" max="99" value="3"></label>
+      <div id="periodHelp" class="field-help"></div>
+      <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="periodSaveBtn" class="btn primary" value="default" type="button">Save Period</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="machineDialog">
+    <form method="dialog" id="machineForm" class="dialog-form">
+      <div class="dialog-head"><div><div class="eyebrow">MASTER DATA</div><h3 id="machineDialogTitle">Add Machine</h3></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
+      <input id="machineOriginalId" type="hidden">
+      <label>Machine ID<input id="machineId" type="text" required placeholder="L-13"></label>
+      <label>Machine Name<input id="machineName" type="text" required placeholder="Extrusion Line"></label>
+      <label>Department<input id="machineDepartment" type="text" placeholder="HDPE"></label>
+      <label>Default Product<input id="machineDefaultProduct" type="text" placeholder="HDPE Pipe"></label>
+      <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="machineSaveBtn" class="btn primary" value="default" type="button">Save Machine</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="importDialog" class="wide-dialog">
+    <form method="dialog" class="dialog-form import-dialog-form">
+      <div class="dialog-head"><div><div class="eyebrow">EXCEL IMPORT</div><h3>Review 14-Day Plan</h3><p id="importFileName" class="muted"></p></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
+      <div id="importStatus" class="import-status"></div>
+      <div id="importSummary" class="import-summary"></div>
+      <div id="importErrors" class="error-list" hidden></div>
+      <div id="importPreview" class="table-wrap" hidden><table id="importPreviewTable"></table></div>
+      <fieldset id="importModePanel" class="import-modes" hidden>
+        <legend>How should the validated plan be applied?</legend>
+        <label><input type="radio" name="importMode" value="update" checked><span><strong>Update Listed Machines Only</strong><small>Only machines present in the file will have their draft periods replaced.</small></span></label>
+        <label><input type="radio" name="importMode" value="replace"><span><strong>Replace Entire Draft Plan</strong><small>All current draft machine periods will be cleared, then the file will be applied.</small></span></label>
+      </fieldset>
+      <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="applyImportBtn" class="btn primary" value="default" type="button" disabled>Apply to Draft</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="userDialog">
+    <form method="dialog" id="userForm" class="dialog-form">
+      <div class="dialog-head"><div><div class="eyebrow">ADMINISTRATION</div><h3>Create User</h3></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
+      <label>Full Name<input id="newUserName" type="text" maxlength="100" placeholder="Employee name"></label>
+      <label>Email Address<input id="newUserEmail" type="email" required placeholder="name@company.com"></label>
+      <label>Temporary Password<input id="newUserPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters"></label>
+      <label>Role<select id="newUserRole"><option value="production_manager">Production Manager</option><option value="hr">HR</option><option value="admin">Admin</option></select></label>
+      <div class="field-help">The user must sign in with this email and temporary password. There is no public sign-up.</div>
+      <div id="userFormError" class="form-message error" hidden></div>
+      <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="createUserBtn" class="btn primary" value="default" type="button">Create User</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/vendor/firebase-app-compat.js"></script>
+  <script src="/vendor/firebase-auth-compat.js"></script>
+  <script src="/vendor/exceljs.min.js"></script>
+  <script src="/excel-import.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

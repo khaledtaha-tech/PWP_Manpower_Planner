@@ -1,0 +1,74 @@
+PWP MANPOWER PLANNER V3 — START HERE
+====================================
+
+IMPORTANT DATA RULE
+-------------------
+Use the original Firebase project that already contains:
+  pwp_manpower / state / history
+
+V3 never seeds, creates, clears or replaces a missing Firestore state document.
+Do not upload data/seed-state.json to Firebase.
+
+LOCAL PREPARATION
+-----------------
+1. Install Node.js 22.
+2. Open a terminal inside this project folder.
+3. Run: npm install
+4. Run: npm test
+5. Copy .env.example to .env.
+6. Fill the Firebase Admin and Web App values described in FIREBASE_SETUP.md.
+7. Create the first Admin by following AUTH_SETUP.md.
+8. Run: npm start
+9. Open: http://localhost:3000
+
+GITHUB
+------
+1. Make a safe backup of the current V2 project folder.
+2. Replace the repository files with the complete contents of this V3 folder.
+3. Confirm node_modules and .env are not selected for commit.
+4. Confirm package-lock.json IS selected for commit.
+5. Commit with a message such as:
+   Add V3 authentication roles and Excel plan import
+6. Push to the main branch.
+
+FIREBASE
+--------
+1. Confirm pwp_manpower/state exists and contains the original data.
+2. Enable Authentication → Email/Password.
+3. Collect the Web App configuration.
+4. Keep the Service Account JSON outside the project.
+5. Create the first Admin locally with: npm run create:first-admin
+6. Add localhost and the Render hostname to Authorized domains.
+
+RENDER
+------
+1. Use Web Service, not Static Site.
+2. Build Command: npm install
+3. Start Command: npm start
+4. Health Check Path: /api/health
+5. Add all variables listed in RENDER_SETUP.md.
+6. Deploy the main branch.
+7. Open /api/health and confirm ok is true.
+
+FINAL ROLE CHECK
+----------------
+1. Admin sees all screens and User Administration.
+2. Production Manager sees all planning screens but not Admin.
+3. HR sees Published Plan only.
+4. HR receives HTTP 403 for draft, history, publish and user APIs.
+
+EXCEL CHECK
+-----------
+1. In 14-Day Plan, press Download Excel Template.
+2. Use the Plan sheet and keep its six columns unchanged.
+3. Import the file and review every error or Preview row.
+4. Choose Update Listed Machines Only or Replace Entire Draft Plan.
+5. Confirm Unsaved changes appears.
+6. Press Save Draft only after review. Import never publishes automatically.
+
+READ NEXT
+---------
+1. FIREBASE_SETUP.md
+2. AUTH_SETUP.md
+3. RENDER_SETUP.md
+4. README.md

@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+data/local-state.json
+data/local-history.json
+data/*.tmp
+serviceAccount*.json
+*service-account*.json
+firebase-adminsdk*.json
+*.pem
+*.key
+.DS_Store
+Thumbs.db

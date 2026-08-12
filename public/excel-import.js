@@ -1,0 +1,194 @@
+(function attachExcelImport(root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.PWPExcel = api;
+}(typeof globalThis !== 'undefined' ? globalThis : this, function createExcelImport() {
+  const HEADERS = ['Machine ID', 'Sequence', 'Status', 'Product', 'Duration', 'Workers/Day'];
+
+  function blank(value) {
+    return value == null || String(value).trim() === '';
+  }
+
+  function integer(value) {
+    if (typeof value === 'number') return Number.isInteger(value) ? value : null;
+    const text = String(value == null ? '' : value).trim();
+    if (!/^\d+$/.test(text)) return null;
+    const parsed = Number(text);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  function simpleCellValue(value) {
+    if (value == null) return '';
+    if (value instanceof Date) return value;
+    if (typeof value !== 'object') return value;
+    if (Object.prototype.hasOwnProperty.call(value, 'result')) return value.result;
+    if (typeof value.text === 'string') return value.text;
+    if (Array.isArray(value.richText)) return value.richText.map(part => part.text || '').join('');
+    return String(value);
+  }
+
+  function worksheetRows(worksheet) {
+    const rows = [];
+    for (let rowNumber = 1; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+      const row = worksheet.getRow(rowNumber);
+      const columnCount = Math.max(HEADERS.length, row.cellCount || 0);
+      const values = [];
+      for (let column = 1; column <= columnCount; column += 1) values.push(simpleCellValue(row.getCell(column).value));
+      rows.push(values);
+    }
+    return rows;
+  }
+
+  function validateWorkbook(workbook, machines) {
+    const errors = [];
+    const machineMap = new Map((machines || []).map(machine => [String(machine.id).trim(), machine]));
+    if (!workbook || typeof workbook.getWorksheet !== 'function') {
+      return { valid: false, errors: [{ row: 0, reason: 'The Excel reader is unavailable.' }], records: [], summary: null };
+    }
+    const sheet = workbook.getWorksheet('Plan');
+    if (!sheet) {
+      return { valid: false, errors: [{ row: 0, reason: 'Sheet "Plan" was not found.' }], records: [], summary: null };
+    }
+    const rows = worksheetRows(sheet);
+    const header = rows[0] || [];
+    HEADERS.forEach((expected, index) => {
+      if (String(header[index] == null ? '' : header[index]).trim() !== expected) {
+        errors.push({ row: 1, reason: `Column ${index + 1} must be exactly "${expected}".` });
+      }
+    });
+    if (header.slice(HEADERS.length).some(value => !blank(value))) {
+      errors.push({ row: 1, reason: 'Plan sheet must contain only the six required columns.' });
+    }
+
+    let lastDataIndex = rows.length - 1;
+    while (lastDataIndex >= 1 && (rows[lastDataIndex] || []).every(blank)) lastDataIndex -= 1;
+    if (lastDataIndex < 1) errors.push({ row: 2, reason: 'The Plan sheet does not contain any plan rows.' });
+
+    const records = [];
+    const signatures = new Map();
+    for (let index = 1; index <= lastDataIndex; index += 1) {
+      const source = rows[index] || [];
+      const rowNumber = index + 1;
+      if (source.every(blank)) {
+        errors.push({ row: rowNumber, reason: 'Blank rows are not allowed between plan rows.' });
+        continue;
+      }
+      if (source.slice(HEADERS.length).some(value => !blank(value))) {
+        errors.push({ row: rowNumber, reason: 'Unexpected data exists after Workers/Day.' });
+      }
+
+      const machineId = String(source[0] == null ? '' : source[0]).trim();
+      const sequence = integer(source[1]);
+      const status = String(source[2] == null ? '' : source[2]).trim().toUpperCase();
+      const product = String(source[3] == null ? '' : source[3]).trim();
+      const duration = integer(source[4]);
+      const workers = integer(source[5]);
+
+      if (!machineId) errors.push({ row: rowNumber, reason: 'Machine ID is required.' });
+      else if (!machineMap.has(machineId)) errors.push({ row: rowNumber, reason: `Machine ID "${machineId}" does not exist in the application.` });
+      if (sequence == null || sequence < 1) errors.push({ row: rowNumber, reason: 'Sequence must be a positive whole number starting from 1.' });
+      if (status !== 'RUN' && status !== 'STOPPED') errors.push({ row: rowNumber, reason: 'Status must be RUN or STOPPED.' });
+      if (status === 'RUN' && !product) errors.push({ row: rowNumber, reason: 'Product is required when Status is RUN.' });
+      if (duration == null || duration < 1 || duration > 14) errors.push({ row: rowNumber, reason: 'Duration must be a whole number from 1 to 14.' });
+      if (workers == null || workers < 0) errors.push({ row: rowNumber, reason: 'Workers/Day must be a non-negative whole number.' });
+      if (status === 'STOPPED' && workers !== 0) errors.push({ row: rowNumber, reason: 'Workers/Day must be 0 when Status is STOPPED.' });
+
+      const signature = [machineId, sequence, status, product, duration, workers].join('\u001f');
+      if (signatures.has(signature)) {
+        errors.push({ row: rowNumber, reason: `Duplicate of row ${signatures.get(signature)}.` });
+      } else {
+        signatures.set(signature, rowNumber);
+      }
+
+      records.push({ machineId, sequence, status, product, duration, workers, sourceRow: rowNumber });
+    }
+
+    const grouped = new Map();
+    records.forEach(record => {
+      if (!record.machineId || !machineMap.has(record.machineId) || record.sequence == null || record.sequence < 1) return;
+      if (!grouped.has(record.machineId)) grouped.set(record.machineId, []);
+      grouped.get(record.machineId).push(record);
+    });
+    for (const [machineId, machineRows] of grouped) {
+      const bySequence = new Map();
+      machineRows.forEach(record => {
+        if (bySequence.has(record.sequence)) {
+          errors.push({ row: record.sourceRow, reason: `Sequence ${record.sequence} is duplicated for machine ${machineId} (first used on row ${bySequence.get(record.sequence)}).` });
+        } else {
+          bySequence.set(record.sequence, record.sourceRow);
+        }
+      });
+      const sequences = [...bySequence.keys()].sort((a, b) => a - b);
+      sequences.forEach((sequence, index) => {
+        if (sequence !== index + 1) {
+          errors.push({ row: bySequence.get(sequence), reason: `Sequences for machine ${machineId} must start at 1 and have no gaps.` });
+        }
+      });
+      const validDurations = machineRows.filter(record => record.duration != null && record.duration >= 1 && record.duration <= 14);
+      const totalDuration = validDurations.reduce((sum, record) => sum + record.duration, 0);
+      if (totalDuration > 14) {
+        errors.push({ row: validDurations[validDurations.length - 1]?.sourceRow || 0, reason: `Total Duration for machine ${machineId} is ${totalDuration} days and exceeds 14.` });
+      }
+    }
+
+    const uniqueErrors = [];
+    const errorKeys = new Set();
+    errors.forEach(error => {
+      const key = `${error.row}|${error.reason}`;
+      if (!errorKeys.has(key)) { errorKeys.add(key); uniqueErrors.push(error); }
+    });
+    uniqueErrors.sort((a, b) => a.row - b.row || a.reason.localeCompare(b.reason));
+
+    const orderedRecords = records.slice().sort((a, b) => a.machineId.localeCompare(b.machineId) || a.sequence - b.sequence);
+    const machineSummaries = [];
+    for (const [machineId, machineRows] of grouped) {
+      const ordered = machineRows.slice().sort((a, b) => a.sequence - b.sequence);
+      machineSummaries.push({
+        machineId,
+        machineName: machineMap.get(machineId)?.name || '',
+        periods: ordered.length,
+        runDays: ordered.filter(row => row.status === 'RUN').reduce((sum, row) => sum + (row.duration || 0), 0),
+        stoppedDays: ordered.filter(row => row.status === 'STOPPED').reduce((sum, row) => sum + (row.duration || 0), 0),
+        totalDays: ordered.reduce((sum, row) => sum + (row.duration || 0), 0)
+      });
+    }
+    machineSummaries.sort((a, b) => a.machineId.localeCompare(b.machineId));
+    const summary = {
+      rows: records.length,
+      machines: grouped.size,
+      periods: records.length,
+      runPeriods: records.filter(row => row.status === 'RUN').length,
+      stoppedPeriods: records.filter(row => row.status === 'STOPPED').length,
+      runDays: records.filter(row => row.status === 'RUN').reduce((sum, row) => sum + (row.duration || 0), 0),
+      stoppedDays: records.filter(row => row.status === 'STOPPED').reduce((sum, row) => sum + (row.duration || 0), 0),
+      machineSummaries
+    };
+
+    return { valid: uniqueErrors.length === 0, errors: uniqueErrors, records: orderedRecords, summary };
+  }
+
+  function applyImportToDraft(state, validation, mode) {
+    if (!validation?.valid) throw new Error('Only a validated Excel plan can be applied.');
+    if (mode !== 'replace' && mode !== 'update') throw new Error('Select a valid import mode.');
+    const nextPlans = mode === 'replace'
+      ? Object.fromEntries(state.machines.map(machine => [machine.id, []]))
+      : Object.fromEntries(Object.entries(state.plans || {}).map(([id, periods]) => [id, periods.map(period => ({ ...period }))]));
+    const grouped = new Map();
+    validation.records.forEach(record => {
+      if (!grouped.has(record.machineId)) grouped.set(record.machineId, []);
+      grouped.get(record.machineId).push(record);
+    });
+    for (const [machineId, rows] of grouped) {
+      nextPlans[machineId] = rows.sort((a, b) => a.sequence - b.sequence).map(row => ({
+        kind: row.status === 'STOPPED' ? 'stopped' : 'run',
+        product: row.status === 'STOPPED' ? 'Stopped' : row.product,
+        days: row.duration,
+        workers: row.status === 'STOPPED' ? 0 : row.workers
+      }));
+    }
+    state.plans = nextPlans;
+    return state;
+  }
+
+  return { HEADERS, validateWorkbook, applyImportToDraft };
+}));

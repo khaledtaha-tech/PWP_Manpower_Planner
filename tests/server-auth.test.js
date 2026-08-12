@@ -1,0 +1,127 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { createServer, HttpError, ROLES } = require('../server');
+
+function sampleState() {
+  return {
+    planStartDate: '2026-08-12',
+    settings: { companyWorkers: 20, currentAgency: 5, requestNoticeDays: 3, releaseNoticeDays: 3, floatingLimit: 2, minReleaseDuration: 3, planDays: 14 },
+    machines: [{ id: 'L-01', name: 'Line 1', department: 'HDPE', defaultProduct: 'Pipe', sortOrder: 1 }],
+    plans: { 'L-01': [{ kind: 'run', product: 'Pipe', days: 14, workers: 3 }] },
+    published: {
+      id: 'PUB-1', publishedAt: '2026-08-12T10:00:00.000Z', planStartDate: '2026-08-12',
+      settings: { companyWorkers: 20, currentAgency: 5, requestNoticeDays: 3, releaseNoticeDays: 3, floatingLimit: 2, minReleaseDuration: 3, planDays: 14 },
+      machines: [{ id: 'L-01', name: 'Line 1', department: 'HDPE', defaultProduct: 'Pipe', sortOrder: 1 }],
+      plans: { 'L-01': [{ kind: 'run', product: 'Pipe', days: 14, workers: 3 }] }
+    },
+    protectedExtraField: { keep: true }
+  };
+}
+
+function fakeAuth() {
+  const profiles = {
+    'admin-token': { uid: 'admin-1', email: 'admin@example.com', displayName: 'Admin', role: ROLES.ADMIN },
+    'pm-token': { uid: 'pm-1', email: 'pm@example.com', displayName: 'Manager', role: ROLES.PRODUCTION_MANAGER },
+    'hr-token': { uid: 'hr-1', email: 'hr@example.com', displayName: 'HR', role: ROLES.HR }
+  };
+  return {
+    async authenticate(req) {
+      const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      if (!profiles[token]) throw new HttpError(401, 'Sign in is required', 'AUTH_REQUIRED');
+      return profiles[token];
+    },
+    async listUsers() { return Object.values(profiles); },
+    async createUser(input) { return { uid: 'new-user', email: input.email, displayName: input.displayName || '', disabled: false, role: input.role }; },
+    async updateUser(uid, input, actorUid) {
+      if (uid === actorUid) throw new HttpError(400, 'You cannot change your own role or disable your own account', 'SELF_ADMIN_CHANGE_BLOCKED');
+      return { uid, email: `${uid}@example.com`, disabled: Boolean(input.disabled), role: input.role || ROLES.HR };
+    }
+  };
+}
+
+function memoryRepository() {
+  let state = sampleState();
+  const history = [state.published];
+  return {
+    async getState() { return structuredClone(state); },
+    async saveDraft(draft) { state = { ...state, ...structuredClone(draft) }; return structuredClone(state); },
+    async publish() {
+      const published = { ...structuredClone(state), id: 'PUB-2', publishedAt: new Date().toISOString() };
+      delete published.published;
+      delete published.protectedExtraField;
+      state.published = published;
+      history.unshift(published);
+      return structuredClone(published);
+    },
+    async getPublished() { return structuredClone(state.published); },
+    async getHistory() { return structuredClone(history); }
+  };
+}
+
+async function withServer(run) {
+  const server = createServer({
+    authService: fakeAuth(), repository: memoryRepository(),
+    publicConfig: { apiKey: 'public-key', authDomain: 'example.firebaseapp.com', projectId: 'example', appId: 'app-id' },
+    ready: true, detail: 'Test services ready'
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  try { await run(`http://127.0.0.1:${address.port}`); }
+  finally { await new Promise(resolve => server.close(resolve)); }
+}
+
+async function request(base, path, token, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${base}${path}`, { ...options, headers });
+  const body = await response.json().catch(() => ({}));
+  return { response, body };
+}
+
+test('public health/config work, while protected data rejects signed-out requests', async () => {
+  await withServer(async base => {
+    assert.equal((await request(base, '/api/health')).response.status, 200);
+    assert.equal((await request(base, '/api/config')).response.status, 200);
+    assert.equal((await request(base, '/api/state')).response.status, 401);
+    assert.equal((await request(base, '/api/published')).response.status, 401);
+  });
+});
+
+test('HR can read Published Plan only and all draft/admin mutations are rejected by the server', async () => {
+  await withServer(async base => {
+    assert.equal((await request(base, '/api/me', 'hr-token')).response.status, 200);
+    assert.equal((await request(base, '/api/published', 'hr-token')).response.status, 200);
+    assert.equal((await request(base, '/api/state', 'hr-token')).response.status, 403);
+    assert.equal((await request(base, '/api/history', 'hr-token')).response.status, 403);
+    assert.equal((await request(base, '/api/state', 'hr-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).response.status, 403);
+    assert.equal((await request(base, '/api/publish', 'hr-token', { method: 'POST' })).response.status, 403);
+    assert.equal((await request(base, '/api/admin/users', 'hr-token')).response.status, 403);
+  });
+});
+
+test('Production Manager can save/publish draft but cannot manage users', async () => {
+  await withServer(async base => {
+    const current = await request(base, '/api/state', 'pm-token');
+    assert.equal(current.response.status, 200);
+    current.body.settings.companyWorkers = 21;
+    const saved = await request(base, '/api/state', 'pm-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(current.body) });
+    assert.equal(saved.response.status, 200);
+    assert.equal(saved.body.state.settings.companyWorkers, 21);
+    assert.deepEqual(saved.body.state.protectedExtraField, { keep: true });
+    assert.equal((await request(base, '/api/publish', 'pm-token', { method: 'POST' })).response.status, 200);
+    assert.equal((await request(base, '/api/history', 'pm-token')).response.status, 200);
+    assert.equal((await request(base, '/api/admin/users', 'pm-token')).response.status, 403);
+  });
+});
+
+test('Admin can access all areas and cannot demote or disable self', async () => {
+  await withServer(async base => {
+    assert.equal((await request(base, '/api/state', 'admin-token')).response.status, 200);
+    assert.equal((await request(base, '/api/history', 'admin-token')).response.status, 200);
+    assert.equal((await request(base, '/api/admin/users', 'admin-token')).response.status, 200);
+    assert.equal((await request(base, '/api/admin/users', 'admin-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'new@example.com', password: 'StrongPass1', role: 'hr' }) })).response.status, 201);
+    const selfChange = await request(base, '/api/admin/users/admin-1', 'admin-token', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'hr' }) });
+    assert.equal(selfChange.response.status, 400);
+    assert.equal(selfChange.body.code, 'SELF_ADMIN_CHANGE_BLOCKED');
+  });
+});

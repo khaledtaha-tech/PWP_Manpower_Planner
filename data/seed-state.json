@@ -1,0 +1,198 @@
+{
+  "planStartDate": "2026-08-12",
+  "settings": {
+    "companyWorkers": 20,
+    "currentAgency": 35,
+    "requestNoticeDays": 3,
+    "releaseNoticeDays": 3,
+    "floatingLimit": 2,
+    "minReleaseDuration": 3,
+    "planDays": 14
+  },
+  "machines": [
+    {
+      "id": "L-01",
+      "name": "Kabra 90",
+      "department": "HDPE",
+      "defaultProduct": "HDPE Single Wall Pipe",
+      "sortOrder": 1
+    },
+    {
+      "id": "L-02",
+      "name": "Beier 2",
+      "department": "PPR",
+      "defaultProduct": "PPR Extrusion",
+      "sortOrder": 2
+    },
+    {
+      "id": "L-03",
+      "name": "Wend 2",
+      "department": "HDPE",
+      "defaultProduct": "HDPE Telecom Pipe",
+      "sortOrder": 3
+    },
+    {
+      "id": "L-04",
+      "name": "Wend 1",
+      "department": "HDPE",
+      "defaultProduct": "HDPE Telecom Pipe",
+      "sortOrder": 4
+    },
+    {
+      "id": "L-05",
+      "name": "Beier 1",
+      "department": "PPR",
+      "defaultProduct": "PPR Extrusion",
+      "sortOrder": 5
+    },
+    {
+      "id": "L-06",
+      "name": "Duct 1",
+      "department": "PVC",
+      "defaultProduct": "PVC Duct",
+      "sortOrder": 6
+    },
+    {
+      "id": "L-07",
+      "name": "Sheeting 1",
+      "department": "Sheeting",
+      "defaultProduct": "Sheet Extrusion",
+      "sortOrder": 7
+    },
+    {
+      "id": "L-08",
+      "name": "Duct 2",
+      "department": "PVC",
+      "defaultProduct": "PVC Duct",
+      "sortOrder": 8
+    },
+    {
+      "id": "L-09",
+      "name": "Sheeting 2",
+      "department": "Sheeting",
+      "defaultProduct": "Sheet Extrusion",
+      "sortOrder": 9
+    },
+    {
+      "id": "L-10",
+      "name": "COD",
+      "department": "HDPE",
+      "defaultProduct": "Corrugated Duct",
+      "sortOrder": 10
+    },
+    {
+      "id": "L-11",
+      "name": "Tongda",
+      "department": "PVC",
+      "defaultProduct": "PVC Pipe",
+      "sortOrder": 11
+    },
+    {
+      "id": "L-12",
+      "name": "DWC",
+      "department": "DWC",
+      "defaultProduct": "Double Wall Corrugated Pipe",
+      "sortOrder": 12
+    }
+  ],
+  "plans": {
+    "L-01": [
+      {
+        "kind": "run",
+        "product": "HDPE Single Wall Pipe",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-02": [
+      {
+        "kind": "run",
+        "product": "PPR Extrusion",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-03": [
+      {
+        "kind": "stopped",
+        "product": "Stopped",
+        "days": 14,
+        "workers": 0
+      }
+    ],
+    "L-04": [
+      {
+        "kind": "run",
+        "product": "HDPE Telecom Pipe",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-05": [
+      {
+        "kind": "run",
+        "product": "PPR Extrusion",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-06": [
+      {
+        "kind": "run",
+        "product": "PVC Duct",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-07": [
+      {
+        "kind": "run",
+        "product": "Sheet Extrusion",
+        "days": 14,
+        "workers": 2
+      }
+    ],
+    "L-08": [
+      {
+        "kind": "stopped",
+        "product": "Stopped",
+        "days": 14,
+        "workers": 0
+      }
+    ],
+    "L-09": [
+      {
+        "kind": "run",
+        "product": "Sheet Extrusion",
+        "days": 14,
+        "workers": 2
+      }
+    ],
+    "L-10": [
+      {
+        "kind": "run",
+        "product": "Corrugated Duct",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-11": [
+      {
+        "kind": "run",
+        "product": "PVC Pipe",
+        "days": 14,
+        "workers": 3
+      }
+    ],
+    "L-12": [
+      {
+        "kind": "run",
+        "product": "Double Wall Corrugated Pipe",
+        "days": 14,
+        "workers": 4
+      }
+    ]
+  },
+  "published": null,
+  "history": []
+}
