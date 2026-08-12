@@ -16,14 +16,19 @@ Do not create another database and do not import `data/seed-state.json`.
 V3 checks that this document exists. If it does not exist, the server reports
 `STATE_NOT_FOUND` and writes nothing.
 
-## 2. Enable Email/Password Authentication
+## 2. Enable Email/Password and Google Authentication
 
 1. In the same Firebase project, open **Build → Authentication**.
 2. If Authentication has not been initialized, press **Get started**.
 3. Open **Sign-in method**.
 4. Select **Email/Password**.
 5. Enable **Email/Password** and save.
-6. Do not enable anonymous sign-in. V3 has no public sign-up endpoint or screen.
+6. Select **Google**, enable it, choose the project support email and save.
+7. Do not enable anonymous sign-in.
+
+The login screen supports Sign In, Create Account, Forgot Password and Continue
+with Google. New self-registered or first-time Google accounts receive no role
+and cannot access application data until approved by an Admin.
 
 ## 3. Get the Web App configuration
 

@@ -6,7 +6,8 @@ draft import.
 
 ## V3 highlights
 
-- Firebase Authentication using Email/Password.
+- Firebase Authentication using Email/Password or Google Sign-In.
+- Create Account and Forgot Password flows on the English login screen.
 - Firebase ID Token verification on the Node server for every protected request.
 - Roles stored securely in Firebase Authentication Custom Claims.
 - Admin user management: create users, assign roles, enable or disable access.
@@ -47,8 +48,10 @@ Nothing reaches Firestore until Production Manager/Admin presses **Save Draft**.
 | Production Manager | Dashboard, plan, actions, published plan, settings, history, Save Draft and Publish |
 | HR | Latest Published Plan only, read-only |
 
-There is no public sign-up. A user cannot create or promote their own account.
-An Admin also cannot demote or disable the currently signed-in Admin account.
+Public registration creates a Firebase Authentication identity with no application
+role. The server rejects that account until an Admin assigns Admin, Production
+Manager or HR from the Admin screen. A user cannot assign or promote their own
+role. An Admin also cannot demote or disable the currently signed-in Admin account.
 
 ## Project contents
 

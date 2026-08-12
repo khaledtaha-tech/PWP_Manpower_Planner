@@ -22,7 +22,8 @@ function fakeAuth() {
   const profiles = {
     'admin-token': { uid: 'admin-1', email: 'admin@example.com', displayName: 'Admin', role: ROLES.ADMIN },
     'pm-token': { uid: 'pm-1', email: 'pm@example.com', displayName: 'Manager', role: ROLES.PRODUCTION_MANAGER },
-    'hr-token': { uid: 'hr-1', email: 'hr@example.com', displayName: 'HR', role: ROLES.HR }
+    'hr-token': { uid: 'hr-1', email: 'hr@example.com', displayName: 'HR', role: ROLES.HR },
+    'pending-token': { uid: 'pending-1', email: 'pending@example.com', displayName: 'Pending User', role: null }
   };
   return {
     async authenticate(req) {
@@ -84,6 +85,15 @@ test('public health/config work, while protected data rejects signed-out request
     assert.equal((await request(base, '/api/config')).response.status, 200);
     assert.equal((await request(base, '/api/state')).response.status, 401);
     assert.equal((await request(base, '/api/published')).response.status, 401);
+  });
+});
+
+test('a self-registered account without a role cannot access any protected application data', async () => {
+  await withServer(async base => {
+    assert.equal((await request(base, '/api/me', 'pending-token')).response.status, 403);
+    assert.equal((await request(base, '/api/published', 'pending-token')).response.status, 403);
+    assert.equal((await request(base, '/api/state', 'pending-token')).response.status, 403);
+    assert.equal((await request(base, '/api/admin/users', 'pending-token')).response.status, 403);
   });
 });
 

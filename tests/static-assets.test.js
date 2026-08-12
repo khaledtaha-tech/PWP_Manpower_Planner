@@ -26,9 +26,19 @@ test('all browser libraries are local project assets and no CDN is used', () => 
 });
 
 test('required screens, role markers, template and setup files exist', () => {
-  for (const marker of ['id="loginScreen"', 'id="tab-admin"', 'id="importDialog"', 'class="tab role-admin"', 'id="logoutBtn"']) assert.ok(html.includes(marker));
+  for (const marker of ['id="loginScreen"', 'id="tab-admin"', 'id="importDialog"', 'class="tab role-admin"', 'id="logoutBtn"', 'id="openCreateAccountBtn"', 'id="googleSignInBtn"', 'id="forgotPasswordBtn"']) assert.ok(html.includes(marker));
   for (const file of ['README.md', 'START_HERE.txt', 'FIREBASE_SETUP.md', 'AUTH_SETUP.md', 'RENDER_SETUP.md', '.env.example', 'firestore.rules', 'package-lock.json']) assert.ok(fs.existsSync(path.join(root, file)), file);
   assert.ok(fs.existsSync(path.join(root, 'public', 'assets', 'PWP_14_Day_Plan_Upload_Template.xlsx')));
+});
+
+test('public authentication flows exist without allowing self-assigned roles', () => {
+  assert.ok(app.includes('createUserWithEmailAndPassword'));
+  assert.ok(app.includes('GoogleAuthProvider'));
+  assert.ok(app.includes('sendPasswordResetEmail'));
+  const registrationDialog = html.match(/<dialog id="createAccountDialog"[\s\S]*?<\/dialog>/)?.[0] || '';
+  assert.ok(registrationDialog.includes('Create Account'));
+  assert.ok(!registrationDialog.includes('name="role"'));
+  assert.ok(!registrationDialog.includes('newUserRole'));
 });
 
 test('server has no seed or local database fallback and keeps original Firestore path', () => {

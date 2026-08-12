@@ -2,7 +2,7 @@
 
 ## Security model
 
-- The browser signs in with Firebase Authentication Email/Password.
+- The browser signs in with Firebase Authentication Email/Password or Google.
 - Each API request sends the Firebase ID Token in the `Authorization: Bearer`
   header.
 - The server verifies the token with Firebase Admin SDK, checks that the user is
@@ -11,6 +11,8 @@
 - Changing a role or disabling a user revokes active refresh tokens.
 - Hiding buttons is only a user-interface convenience; the server independently
   rejects every unauthorized endpoint.
+- **Create Account** and first-time Google Sign-In create an identity with no
+  Custom Claim. Every protected API returns HTTP 403 until an Admin assigns a role.
 
 ## Create the first Admin
 
@@ -43,16 +45,24 @@ If the email already exists in Firebase Authentication, the script safely assign
 the Admin claim to that existing user. Running it again for an already configured
 Admin makes no additional change.
 
-## Create other users
+## Create or approve other users
 
-1. Sign in to PWP with the first Admin.
-2. Open the **Admin** tab.
-3. Press **Create User**.
-4. Enter name, email, temporary password and role.
-5. Press **Create User**.
+There are two secure options:
 
-Users cannot create themselves. Only an authenticated Admin can call the server
-endpoint that creates a user or changes a role.
+1. An Admin can open **Admin → Create User**, enter the user's details and assign
+   a role immediately.
+2. A user can press **Create Account** or **Continue with Google**. The new account
+   appears in the Admin table as **Pending Approval** with no role. An Admin must
+   select Admin, Production Manager or HR and press **Save Role**.
+
+Public registration never asks for a role and cannot create an Admin. Only an
+authenticated Admin can call the server endpoint that assigns or changes a role.
+
+## Forgot Password
+
+1. Press **Forgot Password?** on the login screen.
+2. Enter the registered email address.
+3. Press **Send Reset Link** and use the email sent by Firebase.
 
 ## Change role or disable access
 

@@ -13,6 +13,8 @@ let currentProfile = null;
 let adminUsers = [];
 let pendingImport = null;
 let toastTimer = null;
+let authNotice = '';
+let registrationInProgress = false;
 const readOnlyMode = new URLSearchParams(location.search).get('view') === 'published';
 
 const $ = id => document.getElementById(id);
@@ -74,13 +76,13 @@ function toast(message, type = 'neutral') {
 function setButtonLoading(button, loading, label) {
   if (!button) return;
   if (loading) {
-    button.dataset.previousText = button.textContent;
+    button.dataset.previousHtml = button.innerHTML;
     button.disabled = true;
     button.innerHTML = `<span class="mini-spinner"></span>${esc(label || 'Working…')}`;
   } else {
     button.disabled = false;
-    button.textContent = button.dataset.previousText || label || 'Done';
-    delete button.dataset.previousText;
+    button.innerHTML = button.dataset.previousHtml || esc(label || 'Done');
+    delete button.dataset.previousHtml;
   }
 }
 
@@ -132,6 +134,8 @@ function showLogin(message = '') {
   $('loginScreen').hidden = false;
   $('loginError').hidden = !message;
   $('loginError').textContent = message;
+  $('loginNotice').hidden = !authNotice || Boolean(message);
+  $('loginNotice').textContent = authNotice;
   if (!message) $('loginPassword').value = '';
   setTimeout(() => $('loginEmail')?.focus(), 0);
 }
@@ -154,10 +158,101 @@ function applyRoleInterface() {
 function mapLoginError(error) {
   const code = String(error?.code || '');
   if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'Email or password is incorrect.';
+  if (code.includes('email-already-in-use')) return 'This email is already registered. Use Sign In or Forgot Password.';
+  if (code.includes('invalid-email')) return 'Enter a valid email address.';
+  if (code.includes('weak-password') || code.includes('password-does-not-meet-requirements')) return 'Password must contain at least 8 characters and meet the Firebase password policy.';
   if (code.includes('too-many-requests')) return 'Too many failed attempts. Please wait and try again.';
   if (code.includes('user-disabled')) return 'This account has been disabled. Contact an Admin.';
+  if (code.includes('unauthorized-domain')) return 'This website domain is not authorized in Firebase Authentication.';
+  if (code.includes('popup-closed-by-user')) return 'Google sign-in was cancelled.';
+  if (code.includes('popup-blocked')) return 'The Google sign-in window was blocked by your browser.';
+  if (code.includes('account-exists-with-different-credential')) return 'This email already uses another sign-in method. Sign in with your password or reset it.';
+  if (code.includes('operation-not-allowed')) return 'This sign-in method is not enabled in Firebase Authentication.';
   if (code.includes('network-request-failed')) return 'Network error. Check your connection and try again.';
   return error?.message || 'Sign-in failed.';
+}
+
+function openCreateAccount() {
+  $('createAccountForm').reset();
+  $('registerEmail').value = $('loginEmail').value.trim();
+  $('registerError').hidden = true;
+  $('createAccountDialog').showModal();
+  setTimeout(() => $('registerName').focus(), 0);
+}
+
+async function registerAccount(event) {
+  event.preventDefault();
+  const button = $('registerBtn');
+  const password = $('registerPassword').value;
+  const confirmation = $('registerPasswordConfirm').value;
+  $('registerError').hidden = true;
+  if (password !== confirmation) {
+    $('registerError').textContent = 'Passwords do not match.';
+    $('registerError').hidden = false;
+    return;
+  }
+  registrationInProgress = true;
+  setButtonLoading(button, true, 'Creating…');
+  try {
+    const credential = await auth.createUserWithEmailAndPassword($('registerEmail').value.trim(), password);
+    await credential.user.updateProfile({ displayName: $('registerName').value.trim() });
+    authNotice = 'Account created successfully. An Admin must approve your account and assign a role before you can sign in.';
+    await auth.signOut();
+    $('createAccountDialog').close();
+    $('createAccountForm').reset();
+    showLogin();
+  } catch (error) {
+    $('registerError').textContent = mapLoginError(error);
+    $('registerError').hidden = false;
+  } finally {
+    registrationInProgress = false;
+    setButtonLoading(button, false);
+  }
+}
+
+async function signInWithGoogle() {
+  const button = $('googleSignInBtn');
+  authNotice = '';
+  $('loginError').hidden = true;
+  $('loginNotice').hidden = true;
+  setButtonLoading(button, true, 'Connecting…');
+  try {
+    const provider = new window.firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await auth.signInWithPopup(provider);
+  } catch (error) {
+    $('loginError').textContent = mapLoginError(error);
+    $('loginError').hidden = false;
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+function openForgotPassword() {
+  $('forgotPasswordForm').reset();
+  $('resetEmail').value = $('loginEmail').value.trim();
+  $('resetError').hidden = true;
+  $('forgotPasswordDialog').showModal();
+  setTimeout(() => $('resetEmail').focus(), 0);
+}
+
+async function sendPasswordReset(event) {
+  event.preventDefault();
+  const button = $('sendResetBtn');
+  $('resetError').hidden = true;
+  setButtonLoading(button, true, 'Sending…');
+  try {
+    const email = $('resetEmail').value.trim();
+    await auth.sendPasswordResetEmail(email);
+    authNotice = `A password reset link has been sent to ${email}.`;
+    $('forgotPasswordDialog').close();
+    showLogin();
+  } catch (error) {
+    $('resetError').textContent = mapLoginError(error);
+    $('resetError').hidden = false;
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function initializeAuthentication() {
@@ -184,17 +279,22 @@ async function initializeAuthentication() {
       showLogin();
       return;
     }
+    if (registrationInProgress) return;
     showLoading();
     try {
       currentProfile = await fetchJson('/api/me');
+      authNotice = '';
       applyRoleInterface();
       showApp();
       if (isPlanner() && !readOnlyMode) await loadState();
       else await loadPublishedOnly();
     } catch (error) {
       console.error(error);
+      if (error.code === 'ROLE_REQUIRED') {
+        authNotice = 'Your account is awaiting Admin approval. Ask an Admin to assign your role, then sign in again.';
+      }
       await auth.signOut().catch(() => {});
-      showLogin(error.message);
+      showLogin(error.code === 'ROLE_REQUIRED' ? '' : error.message);
     }
   });
 }
@@ -691,7 +791,9 @@ function renderUsers() {
   $('usersTable').innerHTML = `<thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Sign-In</th><th>Actions</th></tr></thead><tbody>${adminUsers.map(user => {
     const self = user.uid === currentProfile.uid;
     const role = user.role || '';
-    return `<tr><td><strong>${esc(user.displayName || '—')}</strong>${self ? '<span class="self-tag">You</span>' : ''}</td><td>${esc(user.email)}</td><td><select id="user-role-${esc(user.uid)}" class="table-select" ${self ? 'disabled' : ''}><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option><option value="production_manager" ${role === 'production_manager' ? 'selected' : ''}>Production Manager</option><option value="hr" ${role === 'hr' ? 'selected' : ''}>HR</option><option value="" ${role ? '' : 'selected'} disabled>No role</option></select></td><td><span class="badge ${user.disabled ? 'bad' : 'good'}">${user.disabled ? 'Disabled' : 'Active'}</span></td><td>${fmtDateTime(user.lastSignInAt)}</td><td><button class="btn small secondary" onclick="saveUserRole('${esc(user.uid)}')" ${self ? 'disabled' : ''}>Save Role</button> <button class="btn small ${user.disabled ? 'secondary' : 'danger'}" onclick="toggleUserDisabled('${esc(user.uid)}',${!user.disabled})" ${self ? 'disabled' : ''}>${user.disabled ? 'Enable' : 'Disable'}</button></td></tr>`;
+    const statusClass = user.disabled ? 'bad' : role ? 'good' : 'warn';
+    const statusLabel = user.disabled ? 'Disabled' : role ? 'Active' : 'Pending Approval';
+    return `<tr><td><strong>${esc(user.displayName || '—')}</strong>${self ? '<span class="self-tag">You</span>' : ''}</td><td>${esc(user.email)}</td><td><select id="user-role-${esc(user.uid)}" class="table-select" ${self ? 'disabled' : ''}><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option><option value="production_manager" ${role === 'production_manager' ? 'selected' : ''}>Production Manager</option><option value="hr" ${role === 'hr' ? 'selected' : ''}>HR</option><option value="" ${role ? '' : 'selected'} disabled>No role</option></select></td><td><span class="badge ${statusClass}">${statusLabel}</span></td><td>${fmtDateTime(user.lastSignInAt)}</td><td><button class="btn small secondary" onclick="saveUserRole('${esc(user.uid)}')" ${self ? 'disabled' : ''}>Save Role</button> <button class="btn small ${user.disabled ? 'secondary' : 'danger'}" onclick="toggleUserDisabled('${esc(user.uid)}',${!user.disabled})" ${self ? 'disabled' : ''}>${user.disabled ? 'Enable' : 'Disable'}</button></td></tr>`;
   }).join('')}</tbody>`;
 }
 
@@ -747,16 +849,28 @@ document.addEventListener('DOMContentLoaded', () => {
   $('loginThemeToggle').addEventListener('click', toggleTheme);
   $('loginForm').addEventListener('submit', async event => {
     event.preventDefault();
+    authNotice = '';
     $('loginError').hidden = true;
+    $('loginNotice').hidden = true;
     setButtonLoading($('loginBtn'), true, 'Signing in…');
     try {
       await auth.signInWithEmailAndPassword($('loginEmail').value.trim(), $('loginPassword').value);
     } catch (error) {
       $('loginError').hidden = false;
       $('loginError').textContent = mapLoginError(error);
+    } finally {
       setButtonLoading($('loginBtn'), false);
     }
   });
+  $('googleSignInBtn').addEventListener('click', signInWithGoogle);
+  $('openCreateAccountBtn').addEventListener('click', openCreateAccount);
+  $('createAccountForm').addEventListener('submit', registerAccount);
+  $('closeCreateAccountBtn').addEventListener('click', () => $('createAccountDialog').close());
+  $('cancelCreateAccountBtn').addEventListener('click', () => $('createAccountDialog').close());
+  $('forgotPasswordBtn').addEventListener('click', openForgotPassword);
+  $('forgotPasswordForm').addEventListener('submit', sendPasswordReset);
+  $('closeForgotPasswordBtn').addEventListener('click', () => $('forgotPasswordDialog').close());
+  $('cancelForgotPasswordBtn').addEventListener('click', () => $('forgotPasswordDialog').close());
   $('logoutBtn').addEventListener('click', async () => { if (dirty && !confirm('You have unsaved draft changes. Sign out and discard them?')) return; await auth.signOut(); });
   $('saveDraftBtn').addEventListener('click', () => saveDraft().catch(() => {}));
   $('publishBtn').addEventListener('click', publishPlan);

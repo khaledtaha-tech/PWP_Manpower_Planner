@@ -34,11 +34,13 @@ GITHUB
 FIREBASE
 --------
 1. Confirm pwp_manpower/state exists and contains the original data.
-2. Enable Authentication → Email/Password.
+2. Enable Authentication → Email/Password and Google.
 3. Collect the Web App configuration.
 4. Keep the Service Account JSON outside the project.
 5. Create the first Admin locally with: npm run create:first-admin
 6. Add localhost and the Render hostname to Authorized domains.
+7. New self-registered and first-time Google accounts remain Pending Approval
+   until an Admin assigns a role.
 
 RENDER
 ------
