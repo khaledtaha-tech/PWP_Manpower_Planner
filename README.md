@@ -16,6 +16,10 @@ draft import.
 - Production Manager and Admin retain all V2 planning and configuration features.
 - Local ExcelJS reader; the browser does not use an Excel CDN.
 - Excel template download, full validation, error list, preview and confirmation.
+- Crusher is planned in Excel but its demand is covered only from available
+  company/retained Agency surplus; it never creates an Agency request.
+- Redistribute recalculates production, Agency actions and Crusher allocation
+  after manual draft changes.
 - Replace Entire Draft Plan and Update Listed Machines Only import modes.
 - Light/Dark themes and responsive desktop/mobile layout.
 

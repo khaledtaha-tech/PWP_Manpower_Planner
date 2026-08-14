@@ -115,6 +115,7 @@
           <div class="section-actions">
             <a id="downloadTemplateBtn" class="btn secondary" href="/assets/PWP_14_Day_Plan_Upload_Template.xlsx" download>Download Excel Template</a>
             <button id="importExcelBtn" class="btn primary" type="button">Import Excel Plan</button>
+            <button id="redistributeBtn" class="btn secondary" type="button">Redistribute</button>
             <button id="fillAllStoppedBtn" class="btn ghost" type="button">Fill Unplanned Days as Stopped</button>
             <input id="excelFileInput" type="file" accept=".xlsx" hidden>
           </div>
@@ -126,7 +127,7 @@
         <div class="section-head"><div><h2>Agency Manpower Action Plan</h2><p>Requests protect production. Releases only happen after sustained surplus.</p></div></div>
         <div id="actionSummary" class="kpi-grid"></div>
         <div class="card"><div class="table-wrap"><table id="actionsTable"></table></div></div>
-        <div class="note-card"><strong>Floating rule:</strong> temporary surplus can be used for Crusher / support work. The planner does not request extra workers specifically for the crusher.</div>
+        <div class="note-card"><strong>Crusher rule:</strong> Crusher demand is planned separately and is covered from available company surplus, then retained Agency surplus within the configured limit. Crusher demand never creates an Agency request.</div>
       </section>
 
       <section id="tab-published" class="tab-panel"><div id="publishedContainer"></div></section>

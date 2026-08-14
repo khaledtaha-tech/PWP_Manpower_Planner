@@ -1,6 +1,6 @@
 {
   "name": "pwp-manpower-planner",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "private": true,
   "description": "Secure 14-day production and agency manpower planner with Firebase Authentication, role-based access and Excel import",
   "main": "server.js",

@@ -31,6 +31,11 @@ test('required screens, role markers, template and setup files exist', () => {
   assert.ok(fs.existsSync(path.join(root, 'public', 'assets', 'PWP_14_Day_Plan_Upload_Template.xlsx')));
 });
 
+test('planning screen includes the manual Redistribute action', () => {
+  assert.match(html, /id="redistributeBtn"[^>]*>Redistribute</);
+  assert.match(app, /function redistributeWorkforce\(\)/);
+});
+
 test('public authentication flows exist without allowing self-assigned roles', () => {
   assert.ok(app.includes('createUserWithEmailAndPassword'));
   assert.ok(app.includes('GoogleAuthProvider'));
