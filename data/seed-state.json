@@ -5,6 +5,8 @@
     "currentAgency": 35,
     "requestNoticeDays": 3,
     "releaseNoticeDays": 3,
+    "crusherMode": "floating",
+    "crusherWorkers": 2,
     "floatingLimit": 2,
     "minReleaseDuration": 3,
     "planDays": 14

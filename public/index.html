@@ -79,8 +79,7 @@
         </div>
         <div id="userBadge" class="user-badge"></div>
         <button id="themeToggle" class="btn theme-btn" title="Switch theme" aria-label="Switch theme">☾ Dark</button>
-        <button id="openPublishedBtn" class="btn ghost role-planner">Read-Only View</button>
-        <button id="saveDraftBtn" class="btn secondary role-planner">Save Draft</button>
+        <button id="saveDraftBtn" class="btn secondary role-planner">Save</button>
         <button id="publishBtn" class="btn primary role-planner">Publish Plan</button>
         <button id="logoutBtn" class="btn ghost">Sign Out</button>
       </div>
@@ -127,7 +126,7 @@
         <div class="section-head"><div><h2>Agency Manpower Action Plan</h2><p>Requests protect production. Releases only happen after sustained surplus.</p></div></div>
         <div id="actionSummary" class="kpi-grid"></div>
         <div class="card"><div class="table-wrap"><table id="actionsTable"></table></div></div>
-        <div class="note-card"><strong>Crusher rule:</strong> Crusher demand is planned separately and is covered from available company surplus, then retained Agency surplus within the configured limit. Crusher demand never creates an Agency request.</div>
+        <div class="note-card"><strong>Crusher rule:</strong> Mandatory mode reserves the configured Crusher workers every day. Floating mode runs the Crusher only from workers left after production and never hires or retains Agency workers for it.</div>
       </section>
 
       <section id="tab-published" class="tab-panel"><div id="publishedContainer"></div></section>
@@ -146,8 +145,16 @@
                 <label>Current Agency Workers<input id="currentAgency" type="number" min="0"></label>
                 <label>Request Notice (days)<input id="requestNoticeDays" type="number" min="0" max="30"></label>
                 <label>Release Notice (days)<input id="releaseNoticeDays" type="number" min="0" max="30"></label>
-                <label>Allowed Floating Surplus<input id="floatingLimit" type="number" min="0"></label>
+                <label>Crusher Workers<input id="crusherWorkers" type="number" min="0" max="99"></label>
                 <label>Minimum Release Duration<input id="minReleaseDuration" type="number" min="1" max="14"></label>
+                <div class="crusher-mode-field">
+                  <span class="crusher-mode-label">Crusher Operating Mode</span>
+                  <div class="crusher-mode-switch" role="group" aria-label="Crusher operating mode">
+                    <button id="crusherFloatingBtn" class="crusher-mode-option" type="button">Floating</button>
+                    <button id="crusherMandatoryBtn" class="crusher-mode-option" type="button">Mandatory</button>
+                  </div>
+                  <small id="crusherModeHelp">Floating: production first; the Crusher runs only from actual surplus.</small>
+                </div>
                 <div class="form-actions"><button class="btn primary" type="submit">Save Settings</button></div>
               </form>
             </div>

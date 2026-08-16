@@ -23,6 +23,16 @@ const roleLabel = role => ({ admin: 'Admin', production_manager: 'Production Man
 const isPlanner = () => currentProfile && (currentProfile.role === ROLE_ADMIN || currentProfile.role === ROLE_PRODUCTION_MANAGER);
 const isAdmin = () => currentProfile?.role === ROLE_ADMIN;
 
+function normalizeWorkforceSettings(settings = {}) {
+  const crusherWorkers = Number(settings.crusherWorkers ?? settings.floatingLimit ?? 2);
+  return {
+    ...settings,
+    crusherMode: settings.crusherMode === 'mandatory' ? 'mandatory' : 'floating',
+    crusherWorkers: Number.isFinite(crusherWorkers) ? Math.max(0, crusherWorkers) : 2,
+    floatingLimit: Number.isFinite(crusherWorkers) ? Math.max(0, crusherWorkers) : 2
+  };
+}
+
 function getPreferredTheme() {
   const saved = localStorage.getItem('pwp-theme');
   if (saved === 'light' || saved === 'dark') return saved;
@@ -308,6 +318,7 @@ async function loadState() {
   state = loadedState;
   state.history = Array.isArray(history) ? history : [];
   storageHealth = health;
+  state.settings = normalizeWorkforceSettings(state.settings);
   state.settings.planDays = PLAN_DAYS;
   renderAll();
   dirty = false;
@@ -400,25 +411,20 @@ function expandMachine(machine, source = state) {
 
 function calculateDaily(source = state) {
   const rows = [];
-  const company = Number(source.settings.companyWorkers || 0);
+  const settings = normalizeWorkforceSettings(source.settings);
+  const company = Number(settings.companyWorkers || 0);
+  const crusherWorkers = Number(settings.crusherWorkers || 0);
   for (let index = 0; index < PLAN_DAYS; index += 1) {
     let total = 0;
     let active = 0;
     let unplanned = 0;
-    let crusherNeed = 0;
-    let crusherRunning = false;
     for (const machine of source.machines) {
       const cell = expandMachine(machine, source)[index];
-      if (isCrusherMachine(machine)) {
-        if (cell.kind === 'run') {
-          crusherRunning = true;
-          crusherNeed += Number(cell.workers || 0);
-        }
-      } else {
+      if (!isCrusherMachine(machine)) {
         total += Number(cell.workers || 0);
         if (cell.kind === 'run') active += 1;
+        if (cell.kind === 'unplanned') unplanned += 1;
       }
-      if (cell.kind === 'unplanned') unplanned += 1;
     }
     const companySurplus = Math.max(0, company - total);
     rows.push({
@@ -430,8 +436,8 @@ function calculateDaily(source = state) {
       companySurplus,
       agencyNeed: Math.max(0, total - company),
       activeMachines: active,
-      crusherNeed,
-      crusherRunning,
+      crusherNeed: crusherWorkers,
+      crusherMode: settings.crusherMode,
       unplannedMachines: unplanned
     });
   }
@@ -440,42 +446,46 @@ function calculateDaily(source = state) {
 
 function buildActions(source = state) {
   const daily = calculateDaily(source);
-  const settings = source.settings;
-  const floatLimit = Number(settings.floatingLimit || 0);
+  const settings = normalizeWorkforceSettings(source.settings);
+  const mandatory = settings.crusherMode === 'mandatory';
+  const crusherWorkers = Number(settings.crusherWorkers || 0);
   const minimumRelease = Math.max(1, Number(settings.minReleaseDuration || 1));
   let level = Number(settings.currentAgency || 0);
   const actions = [];
-  let index = 0;
-  while (index < daily.length) {
-    const need = daily[index].agencyNeed;
-    if (need > level) {
-      const quantity = need - level;
-      actions.push({ type: 'REQUEST', qty: quantity, from: level, to: need, dayIndex: index, effective: daily[index].date, noticeBy: addDays(daily[index].date, -Number(settings.requestNoticeDays || 0)), reason: `Agency need rises to ${need} workers` });
-      level = need;
-      index += 1;
+  daily.forEach(row => {
+    row.requiredAgency = mandatory
+      ? Math.max(0, row.productionNeed + crusherWorkers - row.companyAvailable)
+      : row.agencyNeed;
+  });
+
+  // The plan starts with the current workforce. A release cannot become effective
+  // until its notice period has elapsed. Requirements inside that opening window
+  // are therefore covered by the starting level, not by an immediate release.
+  for (let index = 0; index < daily.length; index += 1) {
+    const target = daily[index].requiredAgency;
+    if (target > level) {
+      const notice = Number(settings.requestNoticeDays || 0);
+      const previousTarget = index ? daily[index - 1].requiredAgency : level;
+      if (index === 0 || target !== previousTarget) {
+        const quantity = target - level;
+        actions.push({ type: 'REQUEST', qty: quantity, from: level, to: target, dayIndex: index, effective: daily[index].date, noticeBy: addDays(daily[index].date, -notice), reason: mandatory ? `Production and mandatory Crusher require ${target} Agency workers` : `Production need rises to ${target} Agency workers` });
+        level = target;
+      }
       continue;
     }
-    const agencyForCrusher = Math.min(floatLimit, Math.max(0, daily[index].crusherNeed - daily[index].companySurplus));
-    if (level - need > agencyForCrusher) {
-      let end = index;
-      const block = [];
-      while (end < daily.length) {
-        const row = daily[end];
-        const allowance = Math.min(floatLimit, Math.max(0, row.crusherNeed - row.companySurplus));
-        if (level - row.agencyNeed <= allowance) break;
-        block.push({ ...row, allowance });
-        end += 1;
-      }
-      if (block.length >= minimumRelease) {
-        const target = Math.max(...block.map(day => day.agencyNeed + day.allowance));
-        const quantity = level - target;
-        if (quantity > 0) {
-          actions.push({ type: 'RELEASE', qty: quantity, from: level, to: target, dayIndex: index, effective: daily[index].date, noticeBy: addDays(daily[index].date, -Number(settings.releaseNoticeDays || 0)), reason: `Surplus remains after production and planned Crusher allocation for ${block.length} day${block.length === 1 ? '' : 's'}` });
-          level = target;
-        }
-      }
+    if (target >= level) continue;
+    const notice = Number(settings.releaseNoticeDays || 0);
+    if (index < notice || index >= PLAN_DAYS - notice) continue;
+    const previousTarget = index ? daily[index - 1].requiredAgency : Number(settings.currentAgency || 0);
+    if (target === previousTarget) continue;
+    const remainingAtTarget = daily.slice(index).findIndex(row => row.requiredAgency > target);
+    const duration = remainingAtTarget === -1 ? daily.length - index : remainingAtTarget;
+    if (duration < minimumRelease) continue;
+    const quantity = level - target;
+    if (quantity > 0) {
+      actions.push({ type: 'RELEASE', qty: quantity, from: level, to: target, dayIndex: index, effective: daily[index].date, noticeBy: addDays(daily[index].date, -notice), reason: mandatory ? `Lower requirement still covers production and ${crusherWorkers} mandatory Crusher workers for ${duration} days` : `Production surplus remains for ${duration} days; Floating Crusher does not prevent release` });
+      level = target;
     }
-    index += 1;
   }
   const projected = [];
   let projectedLevel = Number(settings.currentAgency || 0);
@@ -485,14 +495,15 @@ function buildActions(source = state) {
   }
   daily.forEach((row, day) => {
     row.projectedAgency = projected[day];
-    row.shortage = Math.max(0, row.agencyNeed - row.projectedAgency);
+    row.shortage = Math.max(0, row.requiredAgency - row.projectedAgency);
     row.surplus = Math.max(0, row.projectedAgency - row.agencyNeed);
-    row.agencyAvailableForCrusher = Math.min(row.surplus, floatLimit);
+    row.agencyAvailableForCrusher = Math.min(row.surplus, crusherWorkers);
     row.crusherAssigned = Math.min(row.crusherNeed, row.companySurplus + row.agencyAvailableForCrusher);
     row.crusherFromAgency = Math.max(0, row.crusherAssigned - Math.min(row.companySurplus, row.crusherNeed));
     row.crusherShortage = Math.max(0, row.crusherNeed - row.crusherAssigned);
     row.floating = row.crusherFromAgency;
     row.excessBeyondFloating = Math.max(0, row.surplus - row.crusherFromAgency);
+    row.crusherRunning = row.crusherAssigned > 0;
   });
   return { actions, daily };
 }
@@ -546,7 +557,7 @@ function renderHeader() {
 
 function renderDashboard(source = state) {
   const { daily, actions } = buildActions(source);
-  const peak = Math.max(...daily.map(row => row.agencyNeed), 0);
+  const peak = Math.max(...daily.map(row => row.requiredAgency), 0);
   const maximumProduction = Math.max(...daily.map(row => row.productionNeed), 0);
   const floatingDays = daily.filter(row => row.crusherAssigned > 0).length;
   const next = actions[0];
@@ -554,10 +565,10 @@ function renderDashboard(source = state) {
     ['Company Workers', source.settings.companyWorkers, 'Fixed daily capacity'],
     ['Current Agency', source.settings.currentAgency, 'On-site baseline'],
     ['Peak Agency Need', peak, `Peak production need: ${maximumProduction}`],
-    ['Crusher Days', floatingDays, 'Covered from available surplus'],
+    ['Crusher Mode', source.settings.crusherMode === 'mandatory' ? 'Mandatory' : 'Floating', `${floatingDays} operating day(s)`],
     ['Next Action', next ? `${next.type} ${next.type === 'REQUEST' ? '+' : '-'}${next.qty}` : 'KEEP', next ? `Effective ${fmtDate(next.effective, true)}` : 'Current level is suitable']
   ].map(([label, value, sub]) => `<div class="kpi"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="sub">${esc(sub)}</div></div>`).join('');
-  $('forecastTable').innerHTML = `<thead><tr><th>Date</th><th>Active Machines</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Need</th><th>Crusher Assigned</th><th>Status</th></tr></thead><tbody>${daily.map(row => {
+  $('forecastTable').innerHTML = `<thead><tr><th>Date</th><th>Active Machines</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Mode</th><th>Crusher Assigned</th><th>Status</th></tr></thead><tbody>${daily.map(row => {
     let status;
     let cls;
     if (row.unplannedMachines > 0) { status = `${row.unplannedMachines} unplanned`; cls = 'warn'; }
@@ -566,13 +577,13 @@ function renderDashboard(source = state) {
     else if (row.crusherShortage > 0) { status = `${row.crusherShortage} Crusher shortage`; cls = 'warn'; }
     else if (row.crusherAssigned > 0) { status = `Crusher covered`; cls = 'info'; }
     else { status = 'Balanced'; cls = 'good'; }
-    return `<tr><td class="nowrap">${fmtDate(row.date, true)}</td><td>${row.activeMachines}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td><strong>${row.agencyNeed}</strong></td><td>${row.projectedAgency}</td><td>${row.crusherNeed}</td><td><strong>${row.crusherAssigned}</strong></td><td><span class="badge ${cls}">${esc(status)}</span></td></tr>`;
+    return `<tr><td class="nowrap">${fmtDate(row.date, true)}</td><td>${row.activeMachines}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td><strong>${row.requiredAgency}</strong></td><td>${row.projectedAgency}</td><td>${mandatoryModeLabel(row.crusherMode)}</td><td><strong>${row.crusherAssigned}</strong></td><td><span class="badge ${cls}">${esc(status)}</span></td></tr>`;
   }).join('')}</tbody>`;
 }
 
 function renderPlan() {
   const start = state.planStartDate;
-  $('machinePlans').innerHTML = state.machines.map(machine => {
+  $('machinePlans').innerHTML = state.machines.filter(machine => !isCrusherMachine(machine)).map(machine => {
     const periods = getMachinePlan(machine.id);
     const used = plannedDays(machine.id);
     const remaining = Math.max(0, PLAN_DAYS - used);
@@ -586,7 +597,7 @@ function renderActions() {
   const { daily, actions } = buildActions(state);
   const totalRequests = actions.filter(action => action.type === 'REQUEST').reduce((sum, action) => sum + action.qty, 0);
   const totalReleases = actions.filter(action => action.type === 'RELEASE').reduce((sum, action) => sum + action.qty, 0);
-  const peak = Math.max(...daily.map(row => row.agencyNeed), 0);
+  const peak = Math.max(...daily.map(row => row.requiredAgency), 0);
   const next = actions[0];
   $('actionSummary').innerHTML = [
     ['Current Agency', state.settings.currentAgency, 'Starting level'], ['Peak Need', peak, 'Within 14-day plan'],
@@ -614,13 +625,29 @@ function renderStorageStatus() {
 }
 
 function renderSettings() {
-  const settings = state.settings;
+  const settings = normalizeWorkforceSettings(state.settings);
   $('companyWorkers').value = settings.companyWorkers;
   $('currentAgency').value = settings.currentAgency;
   $('requestNoticeDays').value = settings.requestNoticeDays;
   $('releaseNoticeDays').value = settings.releaseNoticeDays;
-  $('floatingLimit').value = settings.floatingLimit;
+  $('crusherWorkers').value = settings.crusherWorkers;
   $('minReleaseDuration').value = settings.minReleaseDuration;
+  setCrusherMode(settings.crusherMode, false);
+}
+
+function mandatoryModeLabel(mode) {
+  return mode === 'mandatory' ? 'Mandatory' : 'Floating';
+}
+
+function setCrusherMode(mode, mark = true) {
+  if (!state?.settings) return;
+  state.settings.crusherMode = mode === 'mandatory' ? 'mandatory' : 'floating';
+  $('crusherMandatoryBtn')?.classList.toggle('active', state.settings.crusherMode === 'mandatory');
+  $('crusherFloatingBtn')?.classList.toggle('active', state.settings.crusherMode === 'floating');
+  if ($('crusherModeHelp')) $('crusherModeHelp').textContent = state.settings.crusherMode === 'mandatory'
+    ? 'Mandatory: the configured Crusher workers are reserved every day.'
+    : 'Floating: production first; the Crusher runs only from actual surplus.';
+  if (mark) { markDirty(); renderAll(); }
 }
 
 function renderMachines() {
@@ -628,11 +655,12 @@ function renderMachines() {
 }
 
 function publishedHtml(published) {
+  published.settings = normalizeWorkforceSettings(published.settings);
   const { daily, actions } = buildActions(published);
-  const peak = Math.max(...daily.map(row => row.agencyNeed), 0);
+    const peak = Math.max(...daily.map(row => row.requiredAgency), 0);
   const start = published.planStartDate;
   const end = addDays(start, PLAN_DAYS - 1);
-  return `<div class="readonly-banner">Published plan · Read only · ${fmtDateTime(published.publishedAt)}</div><div class="section-head"><div><h2>Published Manpower Plan</h2><p>${fmtDate(start)} → ${fmtDate(end)} · ${PLAN_DAYS} days</p></div></div><div class="kpi-grid"><div class="kpi"><div class="label">Company Workers</div><div class="value">${published.settings.companyWorkers}</div><div class="sub">Fixed daily capacity</div></div><div class="kpi"><div class="label">Agency at Publish</div><div class="value">${published.settings.currentAgency}</div><div class="sub">Starting level</div></div><div class="kpi"><div class="label">Peak Agency Need</div><div class="value">${peak}</div><div class="sub">14-day forecast</div></div><div class="kpi"><div class="label">Actions</div><div class="value">${actions.length}</div><div class="sub">Request / release</div></div><div class="kpi"><div class="label">Floating Limit</div><div class="value">${published.settings.floatingLimit}</div><div class="sub">Crusher buffer</div></div></div><div class="card"><div class="card-head"><div><h3>Agency Action Plan</h3><p>Official published recommendation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Qty</th><th>Agency Level</th><th>Effective</th><th>Notice By</th><th>Reason</th></tr></thead><tbody>${actions.length ? actions.map(action => `<tr><td class="${action.type === 'REQUEST' ? 'action-request' : 'action-release'}">${action.type}</td><td><strong>${action.type === 'REQUEST' ? '+' : '-'}${action.qty}</strong></td><td>${action.from} → <strong>${action.to}</strong></td><td>${fmtDate(action.effective)}</td><td>${fmtDate(action.noticeBy)}</td><td>${esc(action.reason)}</td></tr>`).join('') : '<tr><td colspan="6"><span class="badge good">KEEP CURRENT WORKFORCE</span> No agency change is required.</td></tr>'}</tbody></table></div></div><div class="card"><div class="card-head"><div><h3>Daily Forecast</h3><p>Production requirement, Agency level, and Crusher allocation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Need</th><th>Crusher Assigned</th></tr></thead><tbody>${daily.map(row => `<tr><td>${fmtDate(row.date, true)}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td>${row.agencyNeed}</td><td>${row.projectedAgency}</td><td>${row.crusherNeed}</td><td>${row.crusherAssigned}</td></tr>`).join('')}</tbody></table></div></div>`;
+  return `<div class="readonly-banner">Published plan · Read only · ${fmtDateTime(published.publishedAt)}</div><div class="section-head"><div><h2>Published Manpower Plan</h2><p>${fmtDate(start)} → ${fmtDate(end)} · ${PLAN_DAYS} days</p></div></div><div class="kpi-grid"><div class="kpi"><div class="label">Company Workers</div><div class="value">${published.settings.companyWorkers}</div><div class="sub">Fixed daily capacity</div></div><div class="kpi"><div class="label">Agency at Publish</div><div class="value">${published.settings.currentAgency}</div><div class="sub">Starting level</div></div><div class="kpi"><div class="label">Peak Agency Need</div><div class="value">${peak}</div><div class="sub">14-day forecast</div></div><div class="kpi"><div class="label">Actions</div><div class="value">${actions.length}</div><div class="sub">Request / release</div></div><div class="kpi"><div class="label">Crusher Mode</div><div class="value">${mandatoryModeLabel(published.settings.crusherMode)}</div><div class="sub">${published.settings.crusherWorkers} workers</div></div></div><div class="card"><div class="card-head"><div><h3>Agency Action Plan</h3><p>Official published recommendation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Qty</th><th>Agency Level</th><th>Effective</th><th>Notice By</th><th>Reason</th></tr></thead><tbody>${actions.length ? actions.map(action => `<tr><td class="${action.type === 'REQUEST' ? 'action-request' : 'action-release'}">${action.type}</td><td><strong>${action.type === 'REQUEST' ? '+' : '-'}${action.qty}</strong></td><td>${action.from} → <strong>${action.to}</strong></td><td>${fmtDate(action.effective)}</td><td>${fmtDate(action.noticeBy)}</td><td>${esc(action.reason)}</td></tr>`).join('') : '<tr><td colspan="6"><span class="badge good">KEEP CURRENT WORKFORCE</span> No agency change is required.</td></tr>'}</tbody></table></div></div><div class="card"><div class="card-head"><div><h3>Daily Forecast</h3><p>Production requirement, Agency level, and Crusher allocation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Mode</th><th>Crusher Assigned</th></tr></thead><tbody>${daily.map(row => `<tr><td>${fmtDate(row.date, true)}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td>${row.requiredAgency}</td><td>${row.projectedAgency}</td><td>${mandatoryModeLabel(row.crusherMode)}</td><td>${row.crusherAssigned}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 
 function renderPublished() {
@@ -648,7 +676,7 @@ function renderHistory() {
   const history = state.history || [];
   $('historyTable').innerHTML = `<thead><tr><th>Published</th><th>Period</th><th>Company</th><th>Agency</th><th>Peak Need</th><th>Actions</th></tr></thead><tbody>${history.length ? history.map(item => {
     const calculation = buildActions(item);
-    const peak = Math.max(...calculation.daily.map(row => row.agencyNeed), 0);
+    const peak = Math.max(...calculation.daily.map(row => row.requiredAgency), 0);
     return `<tr><td>${fmtDateTime(item.publishedAt)}</td><td>${fmtDate(item.planStartDate, true)} → ${fmtDate(addDays(item.planStartDate, 13), true)}</td><td>${item.settings.companyWorkers}</td><td>${item.settings.currentAgency}</td><td>${peak}</td><td>${calculation.actions.length}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">No published plans yet.</td></tr>'}</tbody>`;
 }
@@ -814,7 +842,7 @@ function applyExcelImport() {
   markDirty();
   renderAll();
   switchTab('plan');
-  toast('Excel plan applied to the draft. Press Save Draft when ready.', 'success');
+  toast('Excel plan applied to the draft. Press Save when ready.', 'success');
 }
 
 async function loadUsers() {
@@ -915,7 +943,8 @@ document.addEventListener('DOMContentLoaded', () => {
   $('logoutBtn').addEventListener('click', async () => { if (dirty && !confirm('You have unsaved draft changes. Sign out and discard them?')) return; await auth.signOut(); });
   $('saveDraftBtn').addEventListener('click', () => saveDraft().catch(() => {}));
   $('publishBtn').addEventListener('click', publishPlan);
-  $('openPublishedBtn').addEventListener('click', () => window.open(`${location.origin}${location.pathname}?view=published`, '_blank', 'noopener'));
+  $('crusherFloatingBtn').addEventListener('click', () => setCrusherMode('floating'));
+  $('crusherMandatoryBtn').addEventListener('click', () => setCrusherMode('mandatory'));
   $('planStartDate').addEventListener('change', event => { if (isPlanner()) { state.planStartDate = event.target.value; markDirty(); renderAll(); } });
   $('periodKind').addEventListener('change', updatePeriodDialog);
   $('periodSaveBtn').addEventListener('click', savePeriod);
@@ -923,7 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addMachineBtn').addEventListener('click', () => openMachineDialog());
   $('fillAllStoppedBtn').addEventListener('click', () => {
     if (!isPlanner()) return;
-    state.machines.forEach(machine => { const remaining = PLAN_DAYS - plannedDays(machine.id); if (remaining > 0) state.plans[machine.id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); });
+    state.machines.filter(machine => !isCrusherMachine(machine)).forEach(machine => { const remaining = PLAN_DAYS - plannedDays(machine.id); if (remaining > 0) state.plans[machine.id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); });
     markDirty(); renderAll();
   });
   $('settingsForm').addEventListener('submit', async event => {
@@ -933,7 +962,8 @@ document.addEventListener('DOMContentLoaded', () => {
     state.settings.currentAgency = Number($('currentAgency').value || 0);
     state.settings.requestNoticeDays = Number($('requestNoticeDays').value || 0);
     state.settings.releaseNoticeDays = Number($('releaseNoticeDays').value || 0);
-    state.settings.floatingLimit = Number($('floatingLimit').value || 0);
+    state.settings.crusherWorkers = Number($('crusherWorkers').value || 0);
+    state.settings.floatingLimit = state.settings.crusherWorkers;
     state.settings.minReleaseDuration = Number($('minReleaseDuration').value || 1);
     markDirty(); renderAll();
     await saveDraft().catch(() => {});

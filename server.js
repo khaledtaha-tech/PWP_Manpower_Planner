@@ -92,7 +92,9 @@ function sanitizeDraftState(input, current) {
     currentAgency: strictInteger(rawSettings.currentAgency, 'Current Agency Workers', 0, 999),
     requestNoticeDays: strictInteger(rawSettings.requestNoticeDays, 'Request Notice', 0, 30),
     releaseNoticeDays: strictInteger(rawSettings.releaseNoticeDays, 'Release Notice', 0, 30),
-    floatingLimit: strictInteger(rawSettings.floatingLimit, 'Floating Limit', 0, 99),
+    crusherMode: rawSettings.crusherMode === 'mandatory' ? 'mandatory' : 'floating',
+    crusherWorkers: strictInteger(rawSettings.crusherWorkers ?? rawSettings.floatingLimit ?? current.settings?.crusherWorkers ?? 2, 'Crusher Workers', 0, 99),
+    floatingLimit: strictInteger(rawSettings.crusherWorkers ?? rawSettings.floatingLimit ?? current.settings?.crusherWorkers ?? 2, 'Crusher Workers', 0, 99),
     minReleaseDuration: strictInteger(rawSettings.minReleaseDuration, 'Minimum Release Duration', 1, 14),
     planDays: 14
   };

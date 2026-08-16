@@ -5,12 +5,12 @@ const { createServer, HttpError, ROLES } = require('../server');
 function sampleState() {
   return {
     planStartDate: '2026-08-12',
-    settings: { companyWorkers: 20, currentAgency: 5, requestNoticeDays: 3, releaseNoticeDays: 3, floatingLimit: 2, minReleaseDuration: 3, planDays: 14 },
+    settings: { companyWorkers: 20, currentAgency: 5, requestNoticeDays: 3, releaseNoticeDays: 3, crusherMode: 'floating', crusherWorkers: 2, floatingLimit: 2, minReleaseDuration: 3, planDays: 14 },
     machines: [{ id: 'L-01', name: 'Line 1', department: 'HDPE', defaultProduct: 'Pipe', sortOrder: 1 }],
     plans: { 'L-01': [{ kind: 'run', product: 'Pipe', days: 14, workers: 3 }] },
     published: {
       id: 'PUB-1', publishedAt: '2026-08-12T10:00:00.000Z', planStartDate: '2026-08-12',
-      settings: { companyWorkers: 20, currentAgency: 5, requestNoticeDays: 3, releaseNoticeDays: 3, floatingLimit: 2, minReleaseDuration: 3, planDays: 14 },
+      settings: { companyWorkers: 20, currentAgency: 5, requestNoticeDays: 3, releaseNoticeDays: 3, crusherMode: 'floating', crusherWorkers: 2, floatingLimit: 2, minReleaseDuration: 3, planDays: 14 },
       machines: [{ id: 'L-01', name: 'Line 1', department: 'HDPE', defaultProduct: 'Pipe', sortOrder: 1 }],
       plans: { 'L-01': [{ kind: 'run', product: 'Pipe', days: 14, workers: 3 }] }
     },
@@ -117,6 +117,7 @@ test('Production Manager can save/publish draft but cannot manage users', async 
     const saved = await request(base, '/api/state', 'pm-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(current.body) });
     assert.equal(saved.response.status, 200);
     assert.equal(saved.body.state.settings.companyWorkers, 21);
+    assert.equal(saved.body.state.settings.crusherMode, 'floating');
     assert.deepEqual(saved.body.state.protectedExtraField, { keep: true });
     assert.equal((await request(base, '/api/publish', 'pm-token', { method: 'POST' })).response.status, 200);
     assert.equal((await request(base, '/api/history', 'pm-token')).response.status, 200);
