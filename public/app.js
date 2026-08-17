@@ -583,7 +583,7 @@ function renderDashboard(source = state) {
 
 function renderPlan() {
   const start = state.planStartDate;
-  $('machinePlans').innerHTML = state.machines.filter(machine => !isCrusherMachine(machine)).map(machine => {
+  $('machinePlans').innerHTML = state.machines.map(machine => {
     const periods = getMachinePlan(machine.id);
     const used = plannedDays(machine.id);
     const remaining = Math.max(0, PLAN_DAYS - used);
@@ -952,7 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('addMachineBtn').addEventListener('click', () => openMachineDialog());
   $('fillAllStoppedBtn').addEventListener('click', () => {
     if (!isPlanner()) return;
-    state.machines.filter(machine => !isCrusherMachine(machine)).forEach(machine => { const remaining = PLAN_DAYS - plannedDays(machine.id); if (remaining > 0) state.plans[machine.id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); });
+    state.machines.forEach(machine => { const remaining = PLAN_DAYS - plannedDays(machine.id); if (remaining > 0) state.plans[machine.id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); });
     markDirty(); renderAll();
   });
   $('settingsForm').addEventListener('submit', async event => {
