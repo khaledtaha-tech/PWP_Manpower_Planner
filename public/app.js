@@ -28,8 +28,8 @@ function normalizeWorkforceSettings(settings = {}) {
   return {
     ...settings,
     crusherMode: settings.crusherMode === 'mandatory' ? 'mandatory' : 'floating',
-    crusherWorkers: Number.isFinite(crusherWorkers) ? Math.max(0, crusherWorkers) : 2,
-    floatingLimit: Number.isFinite(crusherWorkers) ? Math.max(0, crusherWorkers) : 2
+    crusherWorkers: Number.isFinite(crusherWorkers) ? Math.max(2, crusherWorkers) : 2,
+    floatingLimit: Number.isFinite(crusherWorkers) ? Math.max(2, crusherWorkers) : 2
   };
 }
 
@@ -583,15 +583,26 @@ function renderDashboard(source = state) {
 
 function renderPlan() {
   const start = state.planStartDate;
+  const isMandatory = state.settings.crusherMode === 'mandatory';
   $('machinePlans').innerHTML = state.machines.map(machine => {
     const periods = getMachinePlan(machine.id);
     const used = plannedDays(machine.id);
     const remaining = Math.max(0, PLAN_DAYS - used);
     const expanded = expandMachine(machine);
     const id = esc(machine.id);
-    return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · ${used}/${PLAN_DAYS} days planned ${remaining ? `· ${remaining} unplanned` : ''}</p></div></div><div class="machine-actions"><div class="progress-line"><span style="width:${Math.min(100, used / PLAN_DAYS * 100)}%"></span></div>${remaining ? `<button class="btn small secondary" onclick="openPeriodDialog('${id}')">+ Add Period</button>` : '<span class="plan-complete">Plan Complete</span>'}${remaining ? `<button class="btn small ghost" onclick="fillStopped('${id}')">Fill ${remaining} Stopped</button>` : ''}<button class="btn small danger" onclick="clearMachinePlan('${id}')">Clear</button></div></div><div>${periods.length ? periods.map((period, index) => `<div class="segment-row"><div class="segment-kind ${period.kind}">${period.kind === 'run' ? 'RUN' : 'STOPPED'}</div><div><strong>${esc(period.product)}</strong></div><div>${period.days} day${Number(period.days) === 1 ? '' : 's'}</div><div>${period.kind === 'run' ? `${period.workers} workers/day` : '0 workers'}</div><div class="segment-actions"><button class="btn small ghost" onclick="moveSegment('${id}',${index},-1)" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" onclick="moveSegment('${id}',${index},1)" ${index === periods.length - 1 ? 'disabled' : ''}>↓</button><button class="btn small secondary" onclick="openPeriodDialog('${id}',${index})">Edit</button><button class="btn small danger" onclick="deleteSegment('${id}',${index})">Delete</button></div></div>`).join('') : '<div class="empty">No periods yet. Add a production run or stopped period.</div>'}</div><div class="timeline">${expanded.map((cell, index) => `<div class="day-cell ${cell.kind}" title="${esc(cell.product)} · ${cell.workers} workers"><span class="n">${fmtDate(addDays(start, index), true)}</span>${cell.kind === 'run' ? esc(cell.workers) : cell.kind === 'stopped' ? 'STOP' : '?'}</div>`).join('')}</div></div>`;
+    const isCrusher = isCrusherMachine(machine);
+    const crusherToggleHtml = isCrusher ? `<button class="btn small ${isMandatory ? 'primary' : 'secondary'}" onclick="toggleCrusherMode()" title="Toggle Mandatory vs Auto-Surplus" style="font-weight:700;">${isMandatory ? '⚡ Mandatory: ON (Hires Agency)' : '🍃 Mandatory: OFF (Surplus Only)'}</button>` : '';
+    return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · ${used}/${PLAN_DAYS} days planned ${remaining ? `· ${remaining} unplanned` : ''}${isCrusher ? ` · Mode: ${isMandatory ? 'Mandatory (2+ workers)' : 'Auto-Surplus'}` : ''}</p></div></div><div class="machine-actions">${crusherToggleHtml}<div class="progress-line"><span style="width:${Math.min(100, used / PLAN_DAYS * 100)}%"></span></div>${remaining ? `<button class="btn small secondary" onclick="openPeriodDialog('${id}')">+ Add Period</button>` : '<span class="plan-complete">Plan Complete</span>'}${remaining ? `<button class="btn small ghost" onclick="fillStopped('${id}')">Fill ${remaining} Stopped</button>` : ''}<button class="btn small danger" onclick="clearMachinePlan('${id}')">Clear</button></div></div><div>${periods.length ? periods.map((period, index) => `<div class="segment-row"><div class="segment-kind ${period.kind}">${period.kind === 'run' ? 'RUN' : 'STOPPED'}</div><div><strong>${esc(period.product)}</strong></div><div>${period.days} day${Number(period.days) === 1 ? '' : 's'}</div><div>${period.kind === 'run' ? `${period.workers} workers/day` : '0 workers'}</div><div class="segment-actions"><button class="btn small ghost" onclick="moveSegment('${id}',${index},-1)" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" onclick="moveSegment('${id}',${index},1)" ${index === periods.length - 1 ? 'disabled' : ''}>↓</button><button class="btn small secondary" onclick="openPeriodDialog('${id}',${index})">Edit</button><button class="btn small danger" onclick="deleteSegment('${id}',${index})">Delete</button></div></div>`).join('') : '<div class="empty">No periods yet. Add a production run or stopped period.</div>'}</div><div class="timeline">${expanded.map((cell, index) => `<div class="day-cell ${cell.kind}" title="${esc(cell.product)} · ${cell.workers} workers"><span class="n">${fmtDate(addDays(start, index), true)}</span>${cell.kind === 'run' ? esc(cell.workers) : cell.kind === 'stopped' ? 'STOP' : '?'}</div>`).join('')}</div></div>`;
   }).join('');
 }
+
+function toggleCrusherMode() {
+  if (!isPlanner()) return;
+  const newMode = state.settings.crusherMode === 'mandatory' ? 'floating' : 'mandatory';
+  setCrusherMode(newMode);
+  toast(`Crusher mode set to ${newMode === 'mandatory' ? 'MANDATORY (ON) - System will hire/retain Agency workers if needed.' : 'MANDATORY (OFF) - Crusher will only run from surplus workers.'}`, 'info');
+}
+window.toggleCrusherMode = toggleCrusherMode;
 
 function renderActions() {
   const { daily, actions } = buildActions(state);
