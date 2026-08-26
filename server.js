@@ -305,7 +305,7 @@ class FirebaseAuthService {
       return { uid: created.uid, email, displayName, disabled: false, role };
     } catch (error) {
       if (created?.uid) {
-        try { await this.auth.deleteUser(created.uid); } catch { /* best-effort rollback of the new account only */ }
+        try { await this.auth.deleteUser(created.uid); } catch { }
       }
       if (error instanceof HttpError) throw error;
       throw new HttpError(400, error.message || 'Unable to create user', 'CREATE_USER_FAILED');
@@ -541,12 +541,10 @@ async function start() {
   return server;
 }
 
-if (require.main === module) {
-  start().catch(error => {
-    console.error(error);
-    process.exitCode = 1;
-  });
-}
+start().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
 module.exports = {
   ROLES,
