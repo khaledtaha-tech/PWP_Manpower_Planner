@@ -7,14 +7,11 @@ let state = null;
 let dirty = false;
 let activeTab = 'dashboard';
 let storageHealth = null;
-let auth = null;
-let currentFirebaseUser = null;
 let currentProfile = null;
 let adminUsers = [];
 let pendingImport = null;
 let toastTimer = null;
 let authNotice = '';
-let registrationInProgress = false;
 const readOnlyMode = new URLSearchParams(location.search).get('view') === 'published';
 
 const $ = id => document.getElementById(id);
@@ -22,6 +19,18 @@ const esc = (value = '') => String(value).replace(/[&<>"']/g, character => ({ '&
 const roleLabel = role => ({ admin: 'Admin', production_manager: 'Production Manager', hr: 'HR' })[role] || role || 'No role';
 const isPlanner = () => currentProfile && (currentProfile.role === ROLE_ADMIN || currentProfile.role === ROLE_PRODUCTION_MANAGER);
 const isAdmin = () => currentProfile?.role === ROLE_ADMIN;
+
+function getStoredToken() {
+  return localStorage.getItem('pwp_token') || '';
+}
+
+function setStoredToken(token) {
+  if (token) {
+    localStorage.setItem('pwp_token', token);
+  } else {
+    localStorage.removeItem('pwp_token');
+  }
+}
 
 function normalizeWorkforceSettings(settings = {}) {
   const crusherWorkers = Number(settings.crusherWorkers ?? settings.floatingLimit ?? 2);
@@ -116,8 +125,8 @@ async function publicFetchJson(url, options) {
 }
 
 async function fetchJson(url, options = {}) {
-  if (!currentFirebaseUser) throw new Error('Sign in is required');
-  const token = await currentFirebaseUser.getIdToken();
+  const token = getStoredToken();
+  if (!token) throw new Error('Sign in is required');
   const headers = new Headers(options.headers || {});
   headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(url, { ...options, headers });
@@ -126,7 +135,10 @@ async function fetchJson(url, options = {}) {
     const error = new Error(payload.error || `Request failed: ${response.status}`);
     error.status = response.status;
     error.code = payload.code;
-    if (response.status === 401 && auth) setTimeout(() => auth.signOut(), 0);
+    if (response.status === 401) {
+      setStoredToken('');
+      showLogin('Session expired. Please sign in again.');
+    }
     throw error;
   }
   return payload;
@@ -165,148 +177,59 @@ function applyRoleInterface() {
   else switchTab('dashboard');
 }
 
-function mapLoginError(error) {
-  const code = String(error?.code || '');
-  if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) return 'Email or password is incorrect.';
-  if (code.includes('email-already-in-use')) return 'This email is already registered. Use Sign In or Forgot Password.';
-  if (code.includes('invalid-email')) return 'Enter a valid email address.';
-  if (code.includes('weak-password') || code.includes('password-does-not-meet-requirements')) return 'Password must contain at least 8 characters and meet the Firebase password policy.';
-  if (code.includes('too-many-requests')) return 'Too many failed attempts. Please wait and try again.';
-  if (code.includes('user-disabled')) return 'This account has been disabled. Contact an Admin.';
-  if (code.includes('unauthorized-domain')) return 'This website domain is not authorized in Firebase Authentication.';
-  if (code.includes('popup-closed-by-user')) return 'Google sign-in was cancelled.';
-  if (code.includes('popup-blocked')) return 'The Google sign-in window was blocked by your browser.';
-  if (code.includes('account-exists-with-different-credential')) return 'This email already uses another sign-in method. Sign in with your password or reset it.';
-  if (code.includes('operation-not-allowed')) return 'This sign-in method is not enabled in Firebase Authentication.';
-  if (code.includes('network-request-failed')) return 'Network error. Check your connection and try again.';
-  return error?.message || 'Sign-in failed.';
-}
-
-function openCreateAccount() {
-  $('createAccountForm').reset();
-  $('registerEmail').value = $('loginEmail').value.trim();
-  $('registerError').hidden = true;
-  $('createAccountDialog').showModal();
-  setTimeout(() => $('registerName').focus(), 0);
-}
-
-async function registerAccount(event) {
+async function handleLogin(event) {
   event.preventDefault();
-  const button = $('registerBtn');
-  const password = $('registerPassword').value;
-  const confirmation = $('registerPasswordConfirm').value;
-  $('registerError').hidden = true;
-  if (password !== confirmation) {
-    $('registerError').textContent = 'Passwords do not match.';
-    $('registerError').hidden = false;
-    return;
-  }
-  registrationInProgress = true;
-  setButtonLoading(button, true, 'Creating…');
-  try {
-    const credential = await auth.createUserWithEmailAndPassword($('registerEmail').value.trim(), password);
-    await credential.user.updateProfile({ displayName: $('registerName').value.trim() });
-    authNotice = 'Account created successfully. An Admin must approve your account and assign a role before you can sign in.';
-    await auth.signOut();
-    $('createAccountDialog').close();
-    $('createAccountForm').reset();
-    showLogin();
-  } catch (error) {
-    $('registerError').textContent = mapLoginError(error);
-    $('registerError').hidden = false;
-  } finally {
-    registrationInProgress = false;
-    setButtonLoading(button, false);
-  }
-}
-
-async function signInWithGoogle() {
-  const button = $('googleSignInBtn');
   authNotice = '';
   $('loginError').hidden = true;
   $('loginNotice').hidden = true;
-  setButtonLoading(button, true, 'Connecting…');
+  const button = $('loginBtn');
+  setButtonLoading(button, true, 'Signing in…');
   try {
-    const provider = new window.firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    await auth.signInWithPopup(provider);
+    const email = $('loginEmail').value.trim();
+    const password = $('loginPassword').value;
+    const result = await publicFetchJson('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    setStoredToken(result.token);
+    await initializeAuthentication();
   } catch (error) {
-    $('loginError').textContent = mapLoginError(error);
     $('loginError').hidden = false;
+    $('loginError').textContent = error.message || 'Login failed';
   } finally {
     setButtonLoading(button, false);
   }
 }
 
-function openForgotPassword() {
-  $('forgotPasswordForm').reset();
-  $('resetEmail').value = $('loginEmail').value.trim();
-  $('resetError').hidden = true;
-  $('forgotPasswordDialog').showModal();
-  setTimeout(() => $('resetEmail').focus(), 0);
-}
-
-async function sendPasswordReset(event) {
-  event.preventDefault();
-  const button = $('sendResetBtn');
-  $('resetError').hidden = true;
-  setButtonLoading(button, true, 'Sending…');
-  try {
-    const email = $('resetEmail').value.trim();
-    await auth.sendPasswordResetEmail(email);
-    authNotice = `A password reset link has been sent to ${email}.`;
-    $('forgotPasswordDialog').close();
-    showLogin();
-  } catch (error) {
-    $('resetError').textContent = mapLoginError(error);
-    $('resetError').hidden = false;
-  } finally {
-    setButtonLoading(button, false);
-  }
+async function logout() {
+  if (dirty && !confirm('You have unsaved draft changes. Sign out and discard them?')) return;
+  setStoredToken('');
+  currentProfile = null;
+  state = null;
+  dirty = false;
+  showLogin();
 }
 
 async function initializeAuthentication() {
   showLoading();
-  const config = await publicFetchJson('/api/config');
-  if (!config.configured) {
-    showLogin('Firebase web authentication is not configured. Follow AUTH_SETUP.md and add the required environment variables.');
-    $('loginBtn').disabled = true;
+  const token = getStoredToken();
+  if (!token) {
+    showLogin();
     return;
   }
-  if (!window.firebase?.initializeApp || typeof window.firebase.auth !== 'function') {
-    showLogin('Firebase Authentication library could not be loaded.');
-    return;
+  try {
+    currentProfile = await fetchJson('/api/me');
+    authNotice = '';
+    applyRoleInterface();
+    showApp();
+    if (isPlanner() && !readOnlyMode) await loadState();
+    else await loadPublishedOnly();
+  } catch (error) {
+    console.error(error);
+    setStoredToken('');
+    showLogin(error.message);
   }
-  if (!window.firebase.apps.length) window.firebase.initializeApp(config.firebase);
-  auth = window.firebase.auth();
-  await auth.setPersistence(window.firebase.auth.Auth.Persistence.LOCAL);
-  auth.onAuthStateChanged(async user => {
-    currentFirebaseUser = user;
-    currentProfile = null;
-    state = null;
-    dirty = false;
-    if (!user) {
-      showLogin();
-      return;
-    }
-    if (registrationInProgress) return;
-    showLoading();
-    try {
-      currentProfile = await fetchJson('/api/me');
-      authNotice = '';
-      applyRoleInterface();
-      showApp();
-      if (isPlanner() && !readOnlyMode) await loadState();
-      else await loadPublishedOnly();
-    } catch (error) {
-      console.error(error);
-      if (error.code === 'ROLE_REQUIRED') {
-        authNotice = 'Your account is awaiting Admin approval. Ask an Admin to assign your role, then sign in again.';
-      }
-      await auth.signOut().catch(() => {});
-      showLogin(error.code === 'ROLE_REQUIRED' ? '' : error.message);
-    }
-  });
 }
 
 async function loadState() {
@@ -345,7 +268,11 @@ async function saveDraft(showToast = true) {
   setButtonLoading(button, true, 'Saving…');
   try {
     const currentHistory = state.history || [];
-    const result = await fetchJson('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) });
+    const result = await fetchJson('/api/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
     state = result.state;
     state.history = currentHistory;
     dirty = false;
@@ -458,9 +385,6 @@ function buildActions(source = state) {
       : row.agencyNeed;
   });
 
-  // The plan starts with the current workforce. A release cannot become effective
-  // until its notice period has elapsed. Requirements inside that opening window
-  // are therefore covered by the starting level, not by an immediate release.
   for (let index = 0; index < daily.length; index += 1) {
     const target = daily[index].requiredAgency;
     if (target > level) {
@@ -628,11 +552,10 @@ function renderActions() {
 
 function renderStorageStatus() {
   const connected = Boolean(storageHealth?.ok);
-  const detail = storageHealth?.detail || 'Unable to check Firebase status';
   $('dbStatus').className = `status-chip ${connected ? 'status-good' : 'status-warn'}`;
-  $('dbStatus').textContent = connected ? 'Firebase Secure' : 'Firebase Issue';
-  $('dbStatus').title = detail;
-  $('databasePanel').innerHTML = `<div class="database-line"><span>Storage</span><strong>Cloud Firestore</strong></div><div class="database-line"><span>Authentication</span><strong>Firebase Email / Password</strong></div><div class="database-line"><span>Status</span><strong style="color:var(--${connected ? 'success' : 'warning'})">${connected ? 'Connected & protected' : 'Configuration issue'}</strong></div><div class="database-detail">${esc(detail)}</div>`;
+  $('dbStatus').textContent = connected ? 'MySQL Connected' : 'DB Issue';
+  $('dbStatus').title = 'Hostinger MySQL Database';
+  $('databasePanel').innerHTML = `<div class="database-line"><span>Storage</span><strong>Hostinger MySQL</strong></div><div class="database-line"><span>Authentication</span><strong>Secure JWT & Password Hash</strong></div><div class="database-line"><span>Status</span><strong style="color:var(--${connected ? 'success' : 'warning'})">${connected ? 'Connected & Active' : 'Configuration Issue'}</strong></div><div class="database-detail">Running on Hostinger Web Hosting.</div>`;
 }
 
 function renderSettings() {
@@ -668,7 +591,7 @@ function renderMachines() {
 function publishedHtml(published) {
   published.settings = normalizeWorkforceSettings(published.settings);
   const { daily, actions } = buildActions(published);
-    const peak = Math.max(...daily.map(row => row.requiredAgency), 0);
+  const peak = Math.max(...daily.map(row => row.requiredAgency), 0);
   const start = published.planStartDate;
   const end = addDays(start, PLAN_DAYS - 1);
   return `<div class="readonly-banner">Published plan · Read only · ${fmtDateTime(published.publishedAt)}</div><div class="section-head"><div><h2>Published Manpower Plan</h2><p>${fmtDate(start)} → ${fmtDate(end)} · ${PLAN_DAYS} days</p></div></div><div class="kpi-grid"><div class="kpi"><div class="label">Company Workers</div><div class="value">${published.settings.companyWorkers}</div><div class="sub">Fixed daily capacity</div></div><div class="kpi"><div class="label">Agency at Publish</div><div class="value">${published.settings.currentAgency}</div><div class="sub">Starting level</div></div><div class="kpi"><div class="label">Peak Agency Need</div><div class="value">${peak}</div><div class="sub">14-day forecast</div></div><div class="kpi"><div class="label">Actions</div><div class="value">${actions.length}</div><div class="sub">Request / release</div></div><div class="kpi"><div class="label">Crusher Mode</div><div class="value">${mandatoryModeLabel(published.settings.crusherMode)}</div><div class="sub">${published.settings.crusherWorkers} workers</div></div></div><div class="card"><div class="card-head"><div><h3>Agency Action Plan</h3><p>Official published recommendation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Qty</th><th>Agency Level</th><th>Effective</th><th>Notice By</th><th>Reason</th></tr></thead><tbody>${actions.length ? actions.map(action => `<tr><td class="${action.type === 'REQUEST' ? 'action-request' : 'action-release'}">${action.type}</td><td><strong>${action.type === 'REQUEST' ? '+' : '-'}${action.qty}</strong></td><td>${action.from} → <strong>${action.to}</strong></td><td>${fmtDate(action.effective)}</td><td>${fmtDate(action.noticeBy)}</td><td>${esc(action.reason)}</td></tr>`).join('') : '<tr><td colspan="6"><span class="badge good">KEEP CURRENT WORKFORCE</span> No agency change is required.</td></tr>'}</tbody></table></div></div><div class="card"><div class="card-head"><div><h3>Daily Forecast</h3><p>Production requirement, Agency level, and Crusher allocation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Mode</th><th>Crusher Assigned</th></tr></thead><tbody>${daily.map(row => `<tr><td>${fmtDate(row.date, true)}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td>${row.requiredAgency}</td><td>${row.projectedAgency}</td><td>${mandatoryModeLabel(row.crusherMode)}</td><td>${row.crusherAssigned}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -868,12 +791,12 @@ async function loadUsers() {
 }
 
 function renderUsers() {
-  $('usersTable').innerHTML = `<thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Sign-In</th><th>Actions</th></tr></thead><tbody>${adminUsers.map(user => {
-    const self = user.uid === currentProfile.uid;
+  $('usersTable').innerHTML = `<thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody>${adminUsers.map(user => {
+    const self = Number(user.id) === Number(currentProfile.id);
     const role = user.role || '';
-    const statusClass = user.disabled ? 'bad' : role ? 'good' : 'warn';
-    const statusLabel = user.disabled ? 'Disabled' : role ? 'Active' : 'Pending Approval';
-    return `<tr><td><strong>${esc(user.displayName || '—')}</strong>${self ? '<span class="self-tag">You</span>' : ''}</td><td>${esc(user.email)}</td><td><select id="user-role-${esc(user.uid)}" class="table-select" ${self ? 'disabled' : ''}><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option><option value="production_manager" ${role === 'production_manager' ? 'selected' : ''}>Production Manager</option><option value="hr" ${role === 'hr' ? 'selected' : ''}>HR</option><option value="" ${role ? '' : 'selected'} disabled>No role</option></select></td><td><span class="badge ${statusClass}">${statusLabel}</span></td><td>${fmtDateTime(user.lastSignInAt)}</td><td><button class="btn small secondary" onclick="saveUserRole('${esc(user.uid)}')" ${self ? 'disabled' : ''}>Save Role</button> <button class="btn small ${user.disabled ? 'secondary' : 'danger'}" onclick="toggleUserDisabled('${esc(user.uid)}',${!user.disabled})" ${self ? 'disabled' : ''}>${user.disabled ? 'Enable' : 'Disable'}</button></td></tr>`;
+    const statusClass = user.disabled ? 'bad' : 'good';
+    const statusLabel = user.disabled ? 'Disabled' : 'Active';
+    return `<tr><td><strong>${esc(user.displayName || '—')}</strong>${self ? '<span class="self-tag">You</span>' : ''}</td><td>${esc(user.email)}</td><td><select id="user-role-${esc(user.id)}" class="table-select" ${self ? 'disabled' : ''}><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option><option value="production_manager" ${role === 'production_manager' ? 'selected' : ''}>Production Manager</option><option value="hr" ${role === 'hr' ? 'selected' : ''}>HR</option></select></td><td><span class="badge ${statusClass}">${statusLabel}</span></td><td><button class="btn small secondary" onclick="saveUserRole('${esc(user.id)}')" ${self ? 'disabled' : ''}>Save Role</button> <button class="btn small ${user.disabled ? 'secondary' : 'danger'}" onclick="toggleUserDisabled('${esc(user.id)}',${!user.disabled})" ${self ? 'disabled' : ''}>${user.disabled ? 'Enable' : 'Disable'}</button></td></tr>`;
   }).join('')}</tbody>`;
 }
 
@@ -884,13 +807,18 @@ async function createUser() {
   setButtonLoading(button, true, 'Creating…');
   try {
     await fetchJson('/api/admin/users', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        displayName: $('newUserName').value.trim(), email: $('newUserEmail').value.trim(), password: $('newUserPassword').value, role: $('newUserRole').value
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: $('newUserName').value.trim(),
+        email: $('newUserEmail').value.trim(),
+        password: $('newUserPassword').value,
+        role: $('newUserRole').value
       })
     });
     $('userDialog').close();
     $('userForm').reset();
-    toast('User created and role assigned.', 'success');
+    toast('User created successfully.', 'success');
     await loadUsers();
   } catch (error) {
     $('userFormError').hidden = false;
@@ -900,24 +828,36 @@ async function createUser() {
   }
 }
 
-async function saveUserRole(uid) {
+async function saveUserRole(id) {
   if (!isAdmin()) return;
-  const role = $(`user-role-${uid}`).value;
+  const role = $(`user-role-${id}`).value;
   try {
-    await fetchJson(`/api/admin/users/${encodeURIComponent(uid)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) });
-    toast('Role updated. The user must sign in again.', 'success');
+    await fetchJson(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+    toast('Role updated successfully.', 'success');
     await loadUsers();
-  } catch (error) { toast(error.message, 'error'); }
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
-async function toggleUserDisabled(uid, disabled) {
+async function toggleUserDisabled(id, disabled) {
   if (!isAdmin()) return;
-  if (disabled && !confirm('Disable this user account and revoke its active sessions?')) return;
+  if (disabled && !confirm('Disable this user account?')) return;
   try {
-    await fetchJson(`/api/admin/users/${encodeURIComponent(uid)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled }) });
+    await fetchJson(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled })
+    });
     toast(disabled ? 'User disabled.' : 'User enabled.', 'success');
     await loadUsers();
-  } catch (error) { toast(error.message, 'error'); }
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 Object.assign(window, { saveUserRole, toggleUserDisabled });
 
@@ -925,48 +865,25 @@ applyTheme(getPreferredTheme());
 
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => switchTab(button.dataset.tab)));
-  $('themeToggle').addEventListener('click', toggleTheme);
-  $('loginThemeToggle').addEventListener('click', toggleTheme);
-  $('loginForm').addEventListener('submit', async event => {
-    event.preventDefault();
-    authNotice = '';
-    $('loginError').hidden = true;
-    $('loginNotice').hidden = true;
-    setButtonLoading($('loginBtn'), true, 'Signing in…');
-    try {
-      await auth.signInWithEmailAndPassword($('loginEmail').value.trim(), $('loginPassword').value);
-    } catch (error) {
-      $('loginError').hidden = false;
-      $('loginError').textContent = mapLoginError(error);
-    } finally {
-      setButtonLoading($('loginBtn'), false);
-    }
-  });
-  $('googleSignInBtn').addEventListener('click', signInWithGoogle);
-  $('openCreateAccountBtn').addEventListener('click', openCreateAccount);
-  $('createAccountForm').addEventListener('submit', registerAccount);
-  $('closeCreateAccountBtn').addEventListener('click', () => $('createAccountDialog').close());
-  $('cancelCreateAccountBtn').addEventListener('click', () => $('createAccountDialog').close());
-  $('forgotPasswordBtn').addEventListener('click', openForgotPassword);
-  $('forgotPasswordForm').addEventListener('submit', sendPasswordReset);
-  $('closeForgotPasswordBtn').addEventListener('click', () => $('forgotPasswordDialog').close());
-  $('cancelForgotPasswordBtn').addEventListener('click', () => $('forgotPasswordDialog').close());
-  $('logoutBtn').addEventListener('click', async () => { if (dirty && !confirm('You have unsaved draft changes. Sign out and discard them?')) return; await auth.signOut(); });
-  $('saveDraftBtn').addEventListener('click', () => saveDraft().catch(() => {}));
-  $('publishBtn').addEventListener('click', publishPlan);
-  $('crusherFloatingBtn').addEventListener('click', () => setCrusherMode('floating'));
-  $('crusherMandatoryBtn').addEventListener('click', () => setCrusherMode('mandatory'));
-  $('planStartDate').addEventListener('change', event => { if (isPlanner()) { state.planStartDate = event.target.value; markDirty(); renderAll(); } });
-  $('periodKind').addEventListener('change', updatePeriodDialog);
-  $('periodSaveBtn').addEventListener('click', savePeriod);
-  $('machineSaveBtn').addEventListener('click', saveMachine);
-  $('addMachineBtn').addEventListener('click', () => openMachineDialog());
-  $('fillAllStoppedBtn').addEventListener('click', () => {
+  $('themeToggle')?.addEventListener('click', toggleTheme);
+  $('loginThemeToggle')?.addEventListener('click', toggleTheme);
+  $('loginForm')?.addEventListener('submit', handleLogin);
+  $('logoutBtn')?.addEventListener('click', logout);
+  $('saveDraftBtn')?.addEventListener('click', () => saveDraft().catch(() => {}));
+  $('publishBtn')?.addEventListener('click', publishPlan);
+  $('crusherFloatingBtn')?.addEventListener('click', () => setCrusherMode('floating'));
+  $('crusherMandatoryBtn')?.addEventListener('click', () => setCrusherMode('mandatory'));
+  $('planStartDate')?.addEventListener('change', event => { if (isPlanner()) { state.planStartDate = event.target.value; markDirty(); renderAll(); } });
+  $('periodKind')?.addEventListener('change', updatePeriodDialog);
+  $('periodSaveBtn')?.addEventListener('click', savePeriod);
+  $('machineSaveBtn')?.addEventListener('click', saveMachine);
+  $('addMachineBtn')?.addEventListener('click', () => openMachineDialog());
+  $('fillAllStoppedBtn')?.addEventListener('click', () => {
     if (!isPlanner()) return;
     state.machines.forEach(machine => { const remaining = PLAN_DAYS - plannedDays(machine.id); if (remaining > 0) state.plans[machine.id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); });
     markDirty(); renderAll();
   });
-  $('settingsForm').addEventListener('submit', async event => {
+  $('settingsForm')?.addEventListener('submit', async event => {
     event.preventDefault();
     if (!isPlanner()) return;
     state.settings.companyWorkers = Number($('companyWorkers').value || 0);
@@ -979,12 +896,12 @@ document.addEventListener('DOMContentLoaded', () => {
     markDirty(); renderAll();
     await saveDraft().catch(() => {});
   });
-  $('importExcelBtn').addEventListener('click', () => { if (isPlanner()) $('excelFileInput').click(); });
-  $('redistributeBtn').addEventListener('click', redistributeWorkforce);
-  $('excelFileInput').addEventListener('change', event => handleExcelFile(event.target.files?.[0]));
-  $('applyImportBtn').addEventListener('click', applyExcelImport);
-  $('addUserBtn').addEventListener('click', () => { $('userFormError').hidden = true; $('userDialog').showModal(); });
-  $('createUserBtn').addEventListener('click', createUser);
+  $('importExcelBtn')?.addEventListener('click', () => { if (isPlanner()) $('excelFileInput').click(); });
+  $('redistributeBtn')?.addEventListener('click', redistributeWorkforce);
+  $('excelFileInput')?.addEventListener('change', event => handleExcelFile(event.target.files?.[0]));
+  $('applyImportBtn')?.addEventListener('click', applyExcelImport);
+  $('addUserBtn')?.addEventListener('click', () => { $('userFormError').hidden = true; $('userDialog').showModal(); });
+  $('createUserBtn')?.addEventListener('click', createUser);
   window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   initializeAuthentication().catch(error => { console.error(error); showLogin(error.message); });
 });
