@@ -1,75 +1,76 @@
 const pool = require('./db');
 
-class MySQLRepository {
-  async getState() {
-    const [rows] = await pool.query('SELECT data FROM app_state WHERE id = ?', ['current_state']);
-    if (!rows.length) {
-      return null;
-    }
-    return typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
+const DEFAULT_STATE = {
+  planStartDate: new Date().toISOString().slice(0, 10),
+  settings: {
+    companyWorkers: 30,
+    currentAgency: 10,
+    requestNoticeDays: 2,
+    releaseNoticeDays: 2,
+    crusherMode: 'floating',
+    crusherWorkers: 2,
+    floatingLimit: 2,
+    minReleaseDuration: 2,
+    planDays: 14
+  },
+  machines: [
+    { id: 'M1', name: 'Extruder 1', department: 'PVC', defaultProduct: 'PVC Pipe 110mm', sortOrder: 1 },
+    { id: 'M2', name: 'Extruder 2', department: 'HDPE', defaultProduct: 'HDPE Pipe 90mm', sortOrder: 2 }
+  ],
+  plans: {
+    M1: [],
+    M2: []
   }
+};
 
-  async saveDraft(draft) {
-    const currentState = await this.getState() || {};
-    const updatedState = { ...currentState, ...draft };
-    const serialized = JSON.stringify(updatedState);
-
-    await pool.query(
-      'INSERT INTO app_state (id, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = ?',
-      ['current_state', serialized, serialized]
-    );
-
-    return updatedState;
-  }
-
-  async publish(snapshotBuilder) {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-
-      const [rows] = await connection.query('SELECT data FROM app_state WHERE id = ? FOR UPDATE', ['current_state']);
-      if (!rows.length) {
-        throw new Error('No state found to publish');
-      }
-
-      const state = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
-      const published = snapshotBuilder(state);
-      state.published = published;
-
-      const serializedState = JSON.stringify(state);
-      const serializedPublished = JSON.stringify(published);
-
-      await connection.query('UPDATE app_state SET data = ? WHERE id = ?', [serializedState, 'current_state']);
-      await connection.query(
-        'INSERT INTO history (id, published_at, data) VALUES (?, ?, ?)',
-        [published.id, published.publishedAt, serializedPublished]
-      );
-
-      await connection.commit();
-      return published;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  async getPublished() {
-    const state = await this.getState();
-    if (!state || !state.published) {
-      return null;
-    }
-    return state.published;
-  }
-
-  async getHistory(limit = 30) {
-    const [rows] = await pool.query(
-      'SELECT data FROM history ORDER BY created_at DESC LIMIT ?',
-      [Number(limit)]
-    );
-    return rows.map(row => (typeof row.data === 'string' ? JSON.parse(row.data) : row.data));
+function parsePayload(row) {
+  if (!row || !row.data) return null;
+  if (typeof row.data === 'object') return row.data;
+  try {
+    return JSON.parse(row.data);
+  } catch {
+    return null;
   }
 }
 
-module.exports = new MySQLRepository();
+const repository = {
+  async getState() {
+    const [rows] = await pool.query('SELECT data FROM app_state WHERE id = 1');
+    const parsed = rows.length ? parsePayload(rows[0]) : null;
+    if (!parsed || !Array.isArray(parsed.machines)) {
+      await this.saveDraft(DEFAULT_STATE);
+      return JSON.parse(JSON.stringify(DEFAULT_STATE));
+    }
+    return parsed;
+  },
+
+  async saveDraft(state) {
+    const json = JSON.stringify(state);
+    await pool.query('REPLACE INTO app_state (id, data) VALUES (1, ?)', [json]);
+    return state;
+  },
+
+  async getPublished() {
+    const [rows] = await pool.query('SELECT data FROM history ORDER BY id DESC LIMIT 1');
+    return rows.length ? parsePayload(rows[0]) : null;
+  },
+
+  async publish(buildSnapshotFn) {
+    const currentState = await this.getState();
+    const snapshot = buildSnapshotFn(currentState);
+    const json = JSON.stringify(snapshot);
+    await pool.query('INSERT INTO history (snapshot_id, published_at, data) VALUES (?, ?, ?)', [
+      snapshot.id,
+      new Date(),
+      json
+    ]);
+    return snapshot;
+  },
+
+  async getHistory(limit = 30) {
+    const [rows] = await pool.query('SELECT data FROM history ORDER BY id DESC LIMIT ?', [Number(limit) || 30]);
+    return rows.map(parsePayload).filter(Boolean);
+  }
+};
+
+module.exports = repository;
