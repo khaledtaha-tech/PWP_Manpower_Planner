@@ -39,6 +39,29 @@
     return rows;
   }
 
+  function machineMetadata(workbook) {
+    const sheet = workbook.getWorksheet('Lists');
+    if (!sheet) return new Map();
+    const rows = worksheetRows(sheet);
+    const header = rows[0] || [];
+    const idColumn = header.findIndex(value => String(value || '').trim() === 'Machine ID');
+    const nameColumn = header.findIndex(value => String(value || '').trim() === 'Machine Name');
+    const departmentColumn = header.findIndex(value => String(value || '').trim() === 'Department');
+    if (idColumn < 0) return new Map();
+
+    const metadata = new Map();
+    rows.slice(1).forEach(row => {
+      const id = String(row[idColumn] || '').trim();
+      if (!id || !/^[A-Za-z0-9._-]+$/.test(id) || id.length > 30 || metadata.has(id)) return;
+      metadata.set(id, {
+        id,
+        name: String(row[nameColumn] || '').trim().slice(0, 100),
+        department: String(row[departmentColumn] || '').trim().slice(0, 80)
+      });
+    });
+    return metadata;
+  }
+
   function validateWorkbook(workbook, machines) {
     const errors = [];
     const machineMap = new Map((machines || []).map(machine => [String(machine.id).trim(), machine]));
@@ -49,6 +72,7 @@
     if (!sheet) {
       return { valid: false, errors: [{ row: 0, reason: 'Sheet "Plan" was not found.' }], records: [], summary: null };
     }
+    const metadata = machineMetadata(workbook);
     const rows = worksheetRows(sheet);
     const header = rows[0] || [];
     HEADERS.forEach((expected, index) => {
@@ -85,7 +109,7 @@
       const workers = integer(source[5]);
 
       if (!machineId) errors.push({ row: rowNumber, reason: 'Machine ID is required.' });
-      else if (!machineMap.has(machineId)) errors.push({ row: rowNumber, reason: `Machine ID "${machineId}" does not exist in the application.` });
+      else if (!/^[A-Za-z0-9._-]+$/.test(machineId) || machineId.length > 30) errors.push({ row: rowNumber, reason: 'Machine ID may contain only letters, numbers, dot, dash or underscore (maximum 30 characters).' });
       if (sequence == null || sequence < 1) errors.push({ row: rowNumber, reason: 'Sequence must be a positive whole number starting from 1.' });
       if (status !== 'RUN' && status !== 'STOPPED') errors.push({ row: rowNumber, reason: 'Status must be RUN or STOPPED.' });
       if (status === 'RUN' && !product) errors.push({ row: rowNumber, reason: 'Product is required when Status is RUN.' });
@@ -105,7 +129,7 @@
 
     const grouped = new Map();
     records.forEach(record => {
-      if (!record.machineId || !machineMap.has(record.machineId) || record.sequence == null || record.sequence < 1) return;
+      if (!record.machineId || !/^[A-Za-z0-9._-]+$/.test(record.machineId) || record.machineId.length > 30 || record.sequence == null || record.sequence < 1) return;
       if (!grouped.has(record.machineId)) grouped.set(record.machineId, []);
       grouped.get(record.machineId).push(record);
     });
@@ -140,12 +164,28 @@
     uniqueErrors.sort((a, b) => a.row - b.row || a.reason.localeCompare(b.reason));
 
     const orderedRecords = records.slice().sort((a, b) => a.machineId.localeCompare(b.machineId) || a.sequence - b.sequence);
+    const newMachines = [...grouped.keys()]
+      .filter(machineId => !machineMap.has(machineId))
+      .sort((a, b) => a.localeCompare(b))
+      .map(machineId => {
+        const listed = metadata.get(machineId) || {};
+        const firstRun = grouped.get(machineId)?.find(record => record.status === 'RUN' && record.product);
+        const crusher = /crusher/i.test(`${machineId} ${listed.name || ''} ${listed.department || ''}`);
+        return {
+          id: machineId,
+          name: listed.name || (crusher ? 'Crusher' : machineId),
+          department: listed.department || (crusher ? 'Crusher' : ''),
+          defaultProduct: firstRun?.product || ''
+        };
+      });
+    const allMachineMap = new Map(machineMap);
+    newMachines.forEach(machine => allMachineMap.set(machine.id, machine));
     const machineSummaries = [];
     for (const [machineId, machineRows] of grouped) {
       const ordered = machineRows.slice().sort((a, b) => a.sequence - b.sequence);
       machineSummaries.push({
         machineId,
-        machineName: machineMap.get(machineId)?.name || '',
+        machineName: allMachineMap.get(machineId)?.name || '',
         periods: ordered.length,
         runDays: ordered.filter(row => row.status === 'RUN').reduce((sum, row) => sum + (row.duration || 0), 0),
         stoppedDays: ordered.filter(row => row.status === 'STOPPED').reduce((sum, row) => sum + (row.duration || 0), 0),
@@ -161,6 +201,7 @@
       stoppedPeriods: records.filter(row => row.status === 'STOPPED').length,
       runDays: records.filter(row => row.status === 'RUN').reduce((sum, row) => sum + (row.duration || 0), 0),
       stoppedDays: records.filter(row => row.status === 'STOPPED').reduce((sum, row) => sum + (row.duration || 0), 0),
+      newMachines,
       machineSummaries
     };
 
@@ -170,9 +211,21 @@
   function applyImportToDraft(state, validation, mode) {
     if (!validation?.valid) throw new Error('Only a validated Excel plan can be applied.');
     if (mode !== 'replace' && mode !== 'update') throw new Error('Select a valid import mode.');
+    state.machines = Array.isArray(state.machines) ? state.machines : [];
+    state.plans = state.plans && typeof state.plans === 'object' ? state.plans : {};
+    const existingIds = new Set(state.machines.map(machine => String(machine.id)));
+    let nextSortOrder = state.machines.reduce((maximum, machine) => Math.max(maximum, Number(machine.sortOrder) || 0), 0) + 1;
+    for (const machine of validation.summary?.newMachines || []) {
+      if (existingIds.has(machine.id)) continue;
+      state.machines.push({ ...machine, sortOrder: nextSortOrder });
+      existingIds.add(machine.id);
+      nextSortOrder += 1;
+    }
+
     const nextPlans = mode === 'replace'
       ? Object.fromEntries(state.machines.map(machine => [machine.id, []]))
       : Object.fromEntries(Object.entries(state.plans || {}).map(([id, periods]) => [id, periods.map(period => ({ ...period }))]));
+    state.machines.forEach(machine => { if (!Array.isArray(nextPlans[machine.id])) nextPlans[machine.id] = []; });
     const grouped = new Map();
     validation.records.forEach(record => {
       if (!grouped.has(record.machineId)) grouped.set(record.machineId, []);

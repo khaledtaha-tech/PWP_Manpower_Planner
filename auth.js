@@ -2,8 +2,18 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('./db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'manpower_secret_key_change_me';
+const JWT_SECRET = process.env.JWT_SECRET;
 const VALID_ROLES = new Set(['admin', 'production_manager', 'hr']);
+
+function jwtSecret() {
+  if (!JWT_SECRET || JWT_SECRET.length < 32) {
+    const err = new Error('JWT_SECRET must be configured with at least 32 characters');
+    err.status = 500;
+    err.code = 'AUTH_CONFIGURATION_ERROR';
+    throw err;
+  }
+  return JWT_SECRET;
+}
 
 class AuthService {
   async register(email, password, displayName, role) {
@@ -79,7 +89,7 @@ class AuthService {
         displayName: user.display_name,
         role: user.role
       },
-      JWT_SECRET,
+      jwtSecret(),
       { expiresIn: '7d' }
     );
 
@@ -104,12 +114,39 @@ class AuthService {
     }
 
     try {
-      return jwt.verify(match[1], JWT_SECRET);
+      return jwt.verify(match[1], jwtSecret());
     } catch {
       const err = new Error('Session expired or invalid');
       err.status = 401;
       throw err;
     }
+  }
+
+  async authenticate(authHeader) {
+    const tokenUser = this.verifyToken(authHeader);
+    const [rows] = await pool.query(
+      'SELECT id, email, display_name AS displayName, role, disabled FROM users WHERE id = ?',
+      [Number(tokenUser.id)]
+    );
+    if (!rows.length) {
+      const err = new Error('User account no longer exists');
+      err.status = 401;
+      err.code = 'ACCOUNT_NOT_FOUND';
+      throw err;
+    }
+    const user = rows[0];
+    if (user.disabled) {
+      const err = new Error('This account is disabled');
+      err.status = 403;
+      err.code = 'ACCOUNT_DISABLED';
+      throw err;
+    }
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role
+    };
   }
 
   async listUsers() {
@@ -120,7 +157,13 @@ class AuthService {
   }
 
   async updateUser(id, { role, disabled, displayName }, actorId) {
-    if (Number(id) === Number(actorId) && (role !== undefined || disabled !== undefined)) {
+    const userId = Number(id);
+    if (!Number.isSafeInteger(userId) || userId < 1) {
+      const err = new Error('Invalid user ID');
+      err.status = 400;
+      throw err;
+    }
+    if (userId === Number(actorId) && (role !== undefined || disabled !== undefined)) {
       const err = new Error('You cannot change your own role or disabled state');
       err.status = 400;
       throw err;
@@ -130,15 +173,21 @@ class AuthService {
     const values = [];
 
     if (role !== undefined) {
-      if (!VALID_ROLES.has(role)) {
+      const cleanRole = String(role).trim().toLowerCase();
+      if (!VALID_ROLES.has(cleanRole)) {
         const err = new Error('Invalid role');
         err.status = 400;
         throw err;
       }
       fields.push('role = ?');
-      values.push(role);
+      values.push(cleanRole);
     }
     if (disabled !== undefined) {
+      if (typeof disabled !== 'boolean') {
+        const err = new Error('Disabled state must be true or false');
+        err.status = 400;
+        throw err;
+      }
       fields.push('disabled = ?');
       values.push(disabled ? 1 : 0);
     }
@@ -149,7 +198,7 @@ class AuthService {
 
     if (!fields.length) return;
 
-    values.push(Number(id));
+    values.push(userId);
     await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
   }
 }

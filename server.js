@@ -5,8 +5,8 @@ const fs = require('fs');
 const path = require('path');
 
 const pool = require('./db');
-const repository = require('./repository');
-const authService = require('./auth');
+const defaultRepository = require('./repository');
+const defaultAuthService = require('./auth');
 
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
@@ -93,8 +93,8 @@ function sanitizeDraftState(input, current) {
     requestNoticeDays: strictInteger(rawSettings.requestNoticeDays, 'Request Notice', 0, 30),
     releaseNoticeDays: strictInteger(rawSettings.releaseNoticeDays, 'Release Notice', 0, 30),
     crusherMode: rawSettings.crusherMode === 'mandatory' ? 'mandatory' : 'floating',
-    crusherWorkers: strictInteger(rawSettings.crusherWorkers ?? rawSettings.floatingLimit ?? current?.settings?.crusherWorkers ?? 2, 'Crusher Workers', 0, 99),
-    floatingLimit: strictInteger(rawSettings.crusherWorkers ?? rawSettings.floatingLimit ?? current?.settings?.crusherWorkers ?? 2, 'Crusher Workers', 0, 99),
+    crusherWorkers: strictInteger(rawSettings.crusherWorkers ?? rawSettings.floatingLimit ?? current?.settings?.crusherWorkers ?? 2, 'Crusher Workers', 2, 99),
+    floatingLimit: strictInteger(rawSettings.crusherWorkers ?? rawSettings.floatingLimit ?? current?.settings?.crusherWorkers ?? 2, 'Crusher Workers', 2, 99),
     minReleaseDuration: strictInteger(rawSettings.minReleaseDuration, 'Minimum Release Duration', 1, 14),
     planDays: 14
   };
@@ -175,7 +175,7 @@ function sanitizeDraftState(input, current) {
     });
   }
 
-  return { planStartDate, settings, machines, plans };
+  return { ...deepClone(current || {}), planStartDate, settings, machines, plans };
 }
 
 function buildSnapshot(state) {
@@ -193,19 +193,25 @@ function roleLabel(role) {
   return ({ admin: 'Admin', production_manager: 'Production Manager', hr: 'HR' })[role] || role;
 }
 
-function requireRole(req, allowedRoles) {
-  const user = authService.verifyToken(req.headers.authorization);
+async function requireRole(req, allowedRoles, authService) {
+  const user = await authService.authenticate(req.headers.authorization);
   if (!allowedRoles.includes(user.role)) {
     throw new HttpError(403, 'You do not have permission to perform this action', 'FORBIDDEN');
   }
   return user;
 }
 
-async function requestHandler(req, res) {
-  try {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+function createRequestHandler({
+  repository = defaultRepository,
+  authService = defaultAuthService,
+  database = pool
+} = {}) {
+  return async function requestHandler(req, res) {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
     if (req.method === 'GET' && url.pathname === '/api/health') {
+      await database.query('SELECT 1');
       return sendJson(res, 200, { ok: true, app: 'PWP Manpower Planner (MySQL)', database: 'Connected' });
     }
 
@@ -216,25 +222,25 @@ async function requestHandler(req, res) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/me') {
-      const user = requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR]);
+      const user = await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR], authService);
       return sendJson(res, 200, { ...user, roleLabel: roleLabel(user.role) });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/published') {
-      requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR]);
+      await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR], authService);
       const published = await repository.getPublished();
       if (!published) throw new HttpError(404, 'No published plan available', 'NOT_FOUND');
       return sendJson(res, 200, published);
     }
 
     if (req.method === 'GET' && url.pathname === '/api/state') {
-      requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER]);
+      await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER], authService);
       const state = await repository.getState();
       return sendJson(res, 200, state || {});
     }
 
     if (req.method === 'POST' && url.pathname === '/api/state') {
-      requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER]);
+      await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER], authService);
       const incoming = await readBody(req);
       const current = await repository.getState();
       const draft = sanitizeDraftState(incoming, current);
@@ -243,25 +249,25 @@ async function requestHandler(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/publish') {
-      requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER]);
+      await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER], authService);
       const published = await repository.publish(buildSnapshot);
       return sendJson(res, 200, { ok: true, published });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/history') {
-      requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER]);
+      await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER], authService);
       const history = await repository.getHistory(30);
       return sendJson(res, 200, history);
     }
 
     if (req.method === 'GET' && url.pathname === '/api/admin/users') {
-      requireRole(req, [ROLES.ADMIN]);
+      await requireRole(req, [ROLES.ADMIN], authService);
       const users = await authService.listUsers();
       return sendJson(res, 200, users);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/admin/users') {
-      requireRole(req, [ROLES.ADMIN]);
+      await requireRole(req, [ROLES.ADMIN], authService);
       const { email, password, displayName, role } = await readBody(req);
       const created = await authService.register(email, password, displayName, role);
       return sendJson(res, 201, created);
@@ -269,7 +275,7 @@ async function requestHandler(req, res) {
 
     const userMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
     if (req.method === 'PATCH' && userMatch) {
-      const actor = requireRole(req, [ROLES.ADMIN]);
+      const actor = await requireRole(req, [ROLES.ADMIN], authService);
       const userId = decodeURIComponent(userMatch[1]);
       await authService.updateUser(userId, await readBody(req), actor.id);
       return sendJson(res, 200, { ok: true });
@@ -279,12 +285,13 @@ async function requestHandler(req, res) {
       return sendJson(res, 404, { error: 'API endpoint not found', code: 'NOT_FOUND' });
     }
 
-    return serveStatic(req, res);
-  } catch (error) {
-    const status = error.status || 500;
-    if (status >= 500) console.error(error);
-    return sendJson(res, status, { error: error.message || 'Server error', code: error.code || 'SERVER_ERROR' });
-  }
+      return serveStatic(req, res);
+    } catch (error) {
+      const status = error.status || 500;
+      if (status >= 500) console.error(error);
+      return sendJson(res, status, { error: error.message || 'Server error', code: error.code || 'SERVER_ERROR' });
+    }
+  };
 }
 
 function serveStatic(req, res) {
@@ -328,15 +335,25 @@ function serveStatic(req, res) {
   });
 }
 
-const server = http.createServer(requestHandler);
+function createServer(dependencies = {}) {
+  return http.createServer(createRequestHandler(dependencies));
+}
 
-server.listen(PORT, async () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  try {
-    const connection = await pool.getConnection();
-    console.log('Database connected successfully');
-    connection.release();
-  } catch (err) {
-    console.error('Database connection failed:', err.message);
-  }
-});
+function startServer() {
+  const server = createServer();
+  server.listen(PORT, async () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    try {
+      const connection = await pool.getConnection();
+      console.log('Database connected successfully');
+      connection.release();
+    } catch (err) {
+      console.error('Database connection failed:', err.message);
+    }
+  });
+  return server;
+}
+
+if (require.main === module) startServer();
+
+module.exports = { createServer, createRequestHandler, HttpError, ROLES, sanitizeDraftState, buildSnapshot };

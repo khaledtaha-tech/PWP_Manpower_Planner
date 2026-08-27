@@ -233,13 +233,15 @@ async function initializeAuthentication() {
 }
 
 async function loadState() {
-  const [loadedState, history, health] = await Promise.all([
+  const [loadedState, history, published, health] = await Promise.all([
     fetchJson('/api/state'),
     fetchJson('/api/history').catch(() => []),
+    fetchJson('/api/published').catch(error => error.status === 404 ? null : Promise.reject(error)),
     publicFetchJson('/api/health').catch(() => null)
   ]);
   state = loadedState;
   state.history = Array.isArray(history) ? history : [];
+  state.published = published;
   storageHealth = health;
   state.settings = normalizeWorkforceSettings(state.settings);
   state.settings.planDays = PLAN_DAYS;
@@ -268,6 +270,7 @@ async function saveDraft(showToast = true) {
   setButtonLoading(button, true, 'Saving…');
   try {
     const currentHistory = state.history || [];
+    const currentPublished = state.published || null;
     const result = await fetchJson('/api/state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -275,6 +278,7 @@ async function saveDraft(showToast = true) {
     });
     state = result.state;
     state.history = currentHistory;
+    state.published = currentPublished;
     dirty = false;
     $('saveState').textContent = 'Draft saved';
     $('saveState').classList.remove('unsaved');
@@ -755,9 +759,12 @@ function renderImportResult(result) {
   }
   const summary = result.summary;
   $('importStatus').className = 'import-status success';
-  $('importStatus').textContent = 'Validation passed. Review the preview and choose how to update the draft.';
+  const newMachineCount = summary.newMachines?.length || 0;
+  $('importStatus').textContent = newMachineCount
+    ? `Validation passed. ${newMachineCount} new machine${newMachineCount === 1 ? '' : 's'} will be added automatically with this draft.`
+    : 'Validation passed. Review the preview and choose how to update the draft.';
   $('importSummary').innerHTML = [
-    ['Machines', summary.machines], ['Plan Rows', summary.rows], ['RUN Periods', summary.runPeriods], ['STOPPED Periods', summary.stoppedPeriods], ['Total Planned Days', summary.runDays + summary.stoppedDays]
+    ['Machines', summary.machines], ['New Machines', newMachineCount], ['Plan Rows', summary.rows], ['RUN Periods', summary.runPeriods], ['STOPPED Periods', summary.stoppedPeriods], ['Total Planned Days', summary.runDays + summary.stoppedDays]
   ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${value}</strong></div>`).join('');
   $('importPreviewTable').innerHTML = `<thead><tr><th>Machine ID</th><th>Sequence</th><th>Status</th><th>Product</th><th>Duration</th><th>Workers/Day</th></tr></thead><tbody>${result.records.map(record => `<tr><td><strong>${esc(record.machineId)}</strong></td><td>${record.sequence}</td><td><span class="badge ${record.status === 'RUN' ? 'good' : 'info'}">${record.status}</span></td><td>${esc(record.product || '—')}</td><td>${record.duration}</td><td>${record.workers}</td></tr>`).join('')}</tbody>`;
   $('importPreview').hidden = false;
@@ -768,7 +775,11 @@ function renderImportResult(result) {
 function applyExcelImport() {
   if (!isPlanner() || !pendingImport?.valid) return toast('A valid import preview is required.', 'error');
   const mode = document.querySelector('input[name="importMode"]:checked')?.value;
-  if (mode === 'replace' && !confirm('Replace the entire current draft plan? Published Plan, History, machines, settings and users will remain unchanged.')) return;
+  const newMachines = pendingImport.summary?.newMachines || [];
+  const confirmations = [];
+  if (newMachines.length) confirmations.push(`Add ${newMachines.length} new machine${newMachines.length === 1 ? '' : 's'} automatically: ${newMachines.map(machine => machine.id).join(', ')}?`);
+  if (mode === 'replace') confirmations.push('Replace the entire current draft plan? Published Plan, History, settings and users will remain unchanged.');
+  if (confirmations.length && !confirm(confirmations.join('\n\n'))) return;
   window.PWPExcel.applyImportToDraft(state, pendingImport, mode);
   $('importDialog').close();
   $('excelFileInput').value = '';
@@ -776,7 +787,7 @@ function applyExcelImport() {
   markDirty();
   renderAll();
   switchTab('plan');
-  toast('Excel plan applied to the draft. Press Save when ready.', 'success');
+  toast(`Excel plan applied to the draft${newMachines.length ? `; ${newMachines.length} new machine${newMachines.length === 1 ? '' : 's'} added` : ''}. Press Save when ready.`, 'success');
 }
 
 async function loadUsers() {
@@ -890,7 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.settings.currentAgency = Number($('currentAgency').value || 0);
     state.settings.requestNoticeDays = Number($('requestNoticeDays').value || 0);
     state.settings.releaseNoticeDays = Number($('releaseNoticeDays').value || 0);
-    state.settings.crusherWorkers = Number($('crusherWorkers').value || 0);
+    state.settings.crusherWorkers = Math.max(2, Number($('crusherWorkers').value || 2));
     state.settings.floatingLimit = state.settings.crusherWorkers;
     state.settings.minReleaseDuration = Number($('minReleaseDuration').value || 1);
     markDirty(); renderAll();

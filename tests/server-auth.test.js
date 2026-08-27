@@ -20,22 +20,22 @@ function sampleState() {
 
 function fakeAuth() {
   const profiles = {
-    'admin-token': { uid: 'admin-1', email: 'admin@example.com', displayName: 'Admin', role: ROLES.ADMIN },
-    'pm-token': { uid: 'pm-1', email: 'pm@example.com', displayName: 'Manager', role: ROLES.PRODUCTION_MANAGER },
-    'hr-token': { uid: 'hr-1', email: 'hr@example.com', displayName: 'HR', role: ROLES.HR },
-    'pending-token': { uid: 'pending-1', email: 'pending@example.com', displayName: 'Pending User', role: null }
+    'admin-token': { id: 'admin-1', email: 'admin@example.com', displayName: 'Admin', role: ROLES.ADMIN },
+    'pm-token': { id: 'pm-1', email: 'pm@example.com', displayName: 'Manager', role: ROLES.PRODUCTION_MANAGER },
+    'hr-token': { id: 'hr-1', email: 'hr@example.com', displayName: 'HR', role: ROLES.HR },
+    'pending-token': { id: 'pending-1', email: 'pending@example.com', displayName: 'Pending User', role: null }
   };
   return {
-    async authenticate(req) {
-      const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    async authenticate(authHeader) {
+      const token = String(authHeader || '').replace(/^Bearer\s+/i, '');
       if (!profiles[token]) throw new HttpError(401, 'Sign in is required', 'AUTH_REQUIRED');
       return profiles[token];
     },
     async listUsers() { return Object.values(profiles); },
-    async createUser(input) { return { uid: 'new-user', email: input.email, displayName: input.displayName || '', disabled: false, role: input.role }; },
-    async updateUser(uid, input, actorUid) {
-      if (uid === actorUid) throw new HttpError(400, 'You cannot change your own role or disable your own account', 'SELF_ADMIN_CHANGE_BLOCKED');
-      return { uid, email: `${uid}@example.com`, disabled: Boolean(input.disabled), role: input.role || ROLES.HR };
+    async register(email, password, displayName, role) { return { id: 'new-user', email, displayName: displayName || '', disabled: false, role }; },
+    async updateUser(id, input, actorId) {
+      if (id === actorId) throw new HttpError(400, 'You cannot change your own role or disable your own account', 'SELF_ADMIN_CHANGE_BLOCKED');
+      return { id, email: `${id}@example.com`, disabled: Boolean(input.disabled), role: input.role || ROLES.HR };
     }
   };
 }
@@ -62,8 +62,7 @@ function memoryRepository() {
 async function withServer(run) {
   const server = createServer({
     authService: fakeAuth(), repository: memoryRepository(),
-    publicConfig: { apiKey: 'public-key', authDomain: 'example.firebaseapp.com', projectId: 'example', appId: 'app-id' },
-    ready: true, detail: 'Test services ready'
+    database: { async query() { return [[{ ok: 1 }]]; } }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -79,10 +78,9 @@ async function request(base, path, token, options = {}) {
   return { response, body };
 }
 
-test('public health/config work, while protected data rejects signed-out requests', async () => {
+test('public health works, while protected data rejects signed-out requests', async () => {
   await withServer(async base => {
     assert.equal((await request(base, '/api/health')).response.status, 200);
-    assert.equal((await request(base, '/api/config')).response.status, 200);
     assert.equal((await request(base, '/api/state')).response.status, 401);
     assert.equal((await request(base, '/api/published')).response.status, 401);
   });
@@ -119,6 +117,10 @@ test('Production Manager can save/publish draft but cannot manage users', async 
     assert.equal(saved.body.state.settings.companyWorkers, 21);
     assert.equal(saved.body.state.settings.crusherMode, 'floating');
     assert.deepEqual(saved.body.state.protectedExtraField, { keep: true });
+    const invalidCrusher = structuredClone(saved.body.state);
+    invalidCrusher.settings.crusherWorkers = 0;
+    invalidCrusher.settings.floatingLimit = 0;
+    assert.equal((await request(base, '/api/state', 'pm-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(invalidCrusher) })).response.status, 400);
     assert.equal((await request(base, '/api/publish', 'pm-token', { method: 'POST' })).response.status, 200);
     assert.equal((await request(base, '/api/history', 'pm-token')).response.status, 200);
     assert.equal((await request(base, '/api/admin/users', 'pm-token')).response.status, 403);

@@ -17,7 +17,7 @@ test('every literal DOM ID used by app.js exists in index.html', () => {
 
 test('all browser libraries are local project assets and no CDN is used', () => {
   const sources = [...html.matchAll(/<(?:script|link)[^>]+(?:src|href)="([^"]+)"/g)].map(match => match[1]);
-  assert.ok(sources.includes('/vendor/firebase-compat.js'));
+  assert.ok(!sources.some(source => /firebase/i.test(source)));
   assert.ok(sources.includes('/vendor/exceljs.min.js'));
   for (const source of sources) {
     assert.ok(source.startsWith('/'), `External source found: ${source}`);
@@ -26,8 +26,8 @@ test('all browser libraries are local project assets and no CDN is used', () => 
 });
 
 test('required screens, role markers, template and setup files exist', () => {
-  for (const marker of ['id="loginScreen"', 'id="tab-admin"', 'id="importDialog"', 'class="tab role-admin"', 'id="logoutBtn"', 'id="openCreateAccountBtn"', 'id="googleSignInBtn"', 'id="forgotPasswordBtn"']) assert.ok(html.includes(marker));
-  for (const file of ['README.md', 'START_HERE.txt', 'FIREBASE_SETUP.md', 'AUTH_SETUP.md', 'RENDER_SETUP.md', '.env.example', 'firestore.rules', 'package-lock.json']) assert.ok(fs.existsSync(path.join(root, file)), file);
+  for (const marker of ['id="loginScreen"', 'id="tab-admin"', 'id="importDialog"', 'class="tab role-admin"', 'id="logoutBtn"']) assert.ok(html.includes(marker));
+  for (const file of ['README.md', 'START_HERE.txt', 'AUTH_SETUP.md', 'HOSTINGER_SETUP.md', '.env.example', 'package-lock.json']) assert.ok(fs.existsSync(path.join(root, file)), file);
   assert.ok(fs.existsSync(path.join(root, 'public', 'assets', 'PWP_14_Day_Plan_Upload_Template.xlsx')));
 });
 
@@ -36,23 +36,19 @@ test('planning screen includes the manual Redistribute action', () => {
   assert.match(app, /function redistributeWorkforce\(\)/);
 });
 
-test('public authentication flows exist without allowing self-assigned roles', () => {
-  assert.ok(app.includes('createUserWithEmailAndPassword'));
-  assert.ok(app.includes('GoogleAuthProvider'));
-  assert.ok(app.includes('sendPasswordResetEmail'));
-  const registrationDialog = html.match(/<dialog id="createAccountDialog"[\s\S]*?<\/dialog>/)?.[0] || '';
-  assert.ok(registrationDialog.includes('Create Account'));
-  assert.ok(!registrationDialog.includes('name="role"'));
-  assert.ok(!registrationDialog.includes('newUserRole'));
+test('authentication UI matches local MySQL and JWT capabilities', () => {
+  assert.ok(app.includes("localStorage.getItem('pwp_token')"));
+  assert.ok(!html.includes('Continue with Google'));
+  assert.ok(!html.includes('Create Account'));
+  assert.ok(!html.includes('Forgot Password'));
+  assert.ok(html.includes('Accounts are created and managed by the PWP Admin.'));
 });
 
-test('server has no seed or local database fallback and keeps original Firestore path', () => {
-  assert.ok(server.includes("collection('pwp_manpower').doc('state')"));
-  assert.ok(server.includes("stateRef().collection('history')"));
-  assert.ok(!server.includes('seed-state.json'));
-  assert.ok(!server.includes('local-state.json'));
-  assert.ok(!server.includes('local-history.json'));
-  assert.ok(server.includes('{ merge: true }'));
+test('server uses MySQL repository and performs server-side authorization', () => {
+  assert.ok(server.includes("require('./repository')"));
+  assert.ok(server.includes('await authService.authenticate'));
+  assert.ok(server.includes('await requireRole'));
+  assert.ok(!server.includes('firebase'));
 });
 
 test('project contains no private key value or service account JSON', () => {

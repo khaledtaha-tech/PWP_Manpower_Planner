@@ -41,13 +41,15 @@ test('downloadable project template contains the required sheets and imports suc
     { id: 'L-01', name: 'Kabra 90' }, { id: 'L-02', name: 'Beier 2' }, ...machines.slice(2)
   ]);
   assert.equal(result.valid, true);
-  assert.equal(result.summary.rows, 4);
+  assert.equal(result.summary.rows, 5);
+  assert.deepEqual(result.summary.newMachines.map(machine => machine.id), ['L-13']);
+  assert.equal(result.summary.newMachines[0].name, 'Crusher');
 });
 
 test('validator returns all row-specific errors without applying anything', () => {
   const result = validateWorkbook(workbook([
     HEADERS,
-    ['UNKNOWN', 2, 'RUN', '', 15, -1],
+    ['BAD ID', 2, 'RUN', '', 15, -1],
     ['L-01', 1, 'STOPPED', '', 5, 2],
     ['L-01', 1, 'RUN', 'Pipe', 10, 3],
     [],
@@ -55,11 +57,37 @@ test('validator returns all row-specific errors without applying anything', () =
   ]), machines);
   assert.equal(result.valid, false);
   assert.ok(result.errors.length >= 9);
-  assert.ok(result.errors.some(error => error.row === 2 && error.reason.includes('does not exist')));
+  assert.ok(result.errors.some(error => error.row === 2 && error.reason.includes('Machine ID may contain')));
   assert.ok(result.errors.some(error => error.row === 3 && error.reason.includes('must be 0')));
   assert.ok(result.errors.some(error => error.row === 4 && error.reason.includes('duplicated')));
   assert.ok(result.errors.some(error => error.row === 5 && error.reason.includes('Blank rows')));
   assert.ok(result.errors.some(error => error.row === 6 && error.reason.includes('RUN or STOPPED')));
+});
+
+test('unknown valid machine IDs are previewed and created automatically from Lists metadata', () => {
+  const book = workbook([
+    HEADERS,
+    ['L-13', 1, 'RUN', 'Crushing / Support', 14, 2]
+  ]);
+  const lists = book.addWorksheet('Lists');
+  lists.addRow(['Status', '', 'Machine ID', 'Machine Name', 'Department']);
+  lists.addRow(['RUN', '', 'L-13', 'Crusher', 'Crusher']);
+  const result = validateWorkbook(book, [{ id: 'M1', name: 'Legacy placeholder', sortOrder: 1 }]);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.summary.newMachines, [{
+    id: 'L-13', name: 'Crusher', department: 'Crusher', defaultProduct: 'Crushing / Support'
+  }]);
+  const state = {
+    machines: [{ id: 'M1', name: 'Legacy placeholder', sortOrder: 1 }],
+    plans: { M1: [] },
+    settings: { companyWorkers: 20 },
+    history: [{ id: 'KEEP' }]
+  };
+  applyImportToDraft(state, result, 'update');
+  assert.equal(state.machines.find(machine => machine.id === 'L-13').name, 'Crusher');
+  assert.equal(state.machines.find(machine => machine.id === 'L-13').sortOrder, 2);
+  assert.equal(state.plans['L-13'][0].workers, 2);
+  assert.deepEqual(state.history, [{ id: 'KEEP' }]);
 });
 
 test('missing Plan sheet and wrong headers are rejected', () => {

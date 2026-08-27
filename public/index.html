@@ -26,44 +26,14 @@
       <form id="loginForm" class="auth-form">
         <label>Email address<input id="loginEmail" type="email" autocomplete="username" required placeholder="name@company.com"></label>
         <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••"></label>
-        <button id="forgotPasswordBtn" class="auth-link forgot-link" type="button">Forgot Password?</button>
-        <div id="loginError" class="form-message error" role="alert" hidden></div>
+      <div id="loginError" class="form-message error" role="alert" hidden></div>
         <div id="loginNotice" class="form-message success" role="status" hidden></div>
         <button id="loginBtn" class="btn primary wide" type="submit"><span class="button-label">Sign In</span></button>
       </form>
-      <div class="auth-divider"><span>or</span></div>
-      <button id="googleSignInBtn" class="btn google-btn wide" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.4-.18-2.07H12v3.92h5.38a4.6 4.6 0 0 1-2 3.02v2.54h3.24c1.9-1.75 2.98-4.33 2.98-7.41Z"/><path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.62-2.36l-3.24-2.54c-.9.6-2.05.96-3.38.96-2.61 0-4.82-1.76-5.61-4.13H3.04v2.62A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.39 13.93A6.01 6.01 0 0 1 6.08 12c0-.67.11-1.32.31-1.93V7.45H3.04A10 10 0 0 0 2 12c0 1.64.39 3.19 1.04 4.55l3.35-2.62Z"/><path fill="#EA4335" d="M12 5.94c1.47 0 2.79.51 3.83 1.5l2.87-2.88A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.96 5.45l3.35 2.62C7.18 7.7 9.39 5.94 12 5.94Z"/></svg>
-        Continue with Google
-      </button>
-      <div class="auth-note">Don’t have an account? <button id="openCreateAccountBtn" class="auth-link" type="button">Create Account</button></div>
+      <div class="auth-note">Accounts are created and managed by the PWP Admin.</div>
       <button id="loginThemeToggle" class="btn subtle theme-login" type="button">☾ Dark theme</button>
     </div>
   </div>
-
-  <dialog id="createAccountDialog" class="auth-dialog">
-    <form id="createAccountForm" class="dialog-form">
-      <div class="dialog-head"><div><div class="eyebrow">NEW ACCOUNT</div><h3>Create Account</h3></div><button id="closeCreateAccountBtn" class="icon-btn" type="button" aria-label="Close">×</button></div>
-      <p class="dialog-copy">Create your sign-in account. An Admin must approve it and assign a role before you can access PWP.</p>
-      <label>Full name<input id="registerName" type="text" maxlength="100" autocomplete="name" required placeholder="Your full name"></label>
-      <label>Email address<input id="registerEmail" type="email" autocomplete="email" required placeholder="name@company.com"></label>
-      <label>Password<input id="registerPassword" type="password" minlength="8" autocomplete="new-password" required placeholder="At least 8 characters"></label>
-      <label>Confirm password<input id="registerPasswordConfirm" type="password" minlength="8" autocomplete="new-password" required placeholder="Repeat your password"></label>
-      <div class="field-help">For security, new accounts have no access until an Admin assigns Admin, Production Manager or HR.</div>
-      <div id="registerError" class="form-message error" role="alert" hidden></div>
-      <div class="dialog-actions"><button id="cancelCreateAccountBtn" class="btn secondary" type="button">Cancel</button><button id="registerBtn" class="btn primary" type="submit">Create Account</button></div>
-    </form>
-  </dialog>
-
-  <dialog id="forgotPasswordDialog" class="auth-dialog">
-    <form id="forgotPasswordForm" class="dialog-form">
-      <div class="dialog-head"><div><div class="eyebrow">ACCOUNT RECOVERY</div><h3>Reset Password</h3></div><button id="closeForgotPasswordBtn" class="icon-btn" type="button" aria-label="Close">×</button></div>
-      <p class="dialog-copy">Enter your email address and Firebase will send you a secure password reset link.</p>
-      <label>Email address<input id="resetEmail" type="email" autocomplete="email" required placeholder="name@company.com"></label>
-      <div id="resetError" class="form-message error" role="alert" hidden></div>
-      <div class="dialog-actions"><button id="cancelForgotPasswordBtn" class="btn secondary" type="button">Cancel</button><button id="sendResetBtn" class="btn primary" type="submit">Send Reset Link</button></div>
-    </form>
-  </dialog>
 
   <div id="appShell" class="app-shell" hidden>
     <header class="topbar">
@@ -135,7 +105,7 @@
         <div class="settings-grid">
           <div>
             <div class="card database-card">
-              <div class="card-head"><div><h3>Database Connection</h3><p>Shared persistence protected by Firebase Authentication.</p></div></div>
+              <div class="card-head"><div><h3>Database Connection</h3><p>Shared MySQL storage protected by JWT authentication.</p></div></div>
               <div id="databasePanel" class="database-panel">Checking storage…</div>
             </div>
             <div class="card">
@@ -145,7 +115,7 @@
                 <label>Current Agency Workers<input id="currentAgency" type="number" min="0"></label>
                 <label>Request Notice (days)<input id="requestNoticeDays" type="number" min="0" max="30"></label>
                 <label>Release Notice (days)<input id="releaseNoticeDays" type="number" min="0" max="30"></label>
-                <label>Crusher Workers<input id="crusherWorkers" type="number" min="0" max="99"></label>
+                <label>Crusher Workers<input id="crusherWorkers" type="number" min="2" max="99"></label>
                 <label>Minimum Release Duration<input id="minReleaseDuration" type="number" min="1" max="14"></label>
                 <div class="crusher-mode-field">
                   <span class="crusher-mode-label">Crusher Operating Mode</span>
@@ -176,7 +146,7 @@
           <div><h2>User Administration</h2><p>Create accounts, assign roles, and enable or disable access.</p></div>
           <button id="addUserBtn" class="btn primary" type="button">+ Create User</button>
         </div>
-        <div class="security-note"><strong>Secure role control:</strong> users cannot register themselves or promote themselves. Role changes are stored as Firebase Custom Claims and active tokens are revoked.</div>
+        <div class="security-note"><strong>Secure role control:</strong> users cannot register themselves or promote themselves. Roles and account status are checked against MySQL on every protected request.</div>
         <div class="card"><div class="table-wrap"><table id="usersTable"></table></div></div>
       </section>
     </main>
@@ -216,8 +186,8 @@
       <div id="importPreview" class="table-wrap" hidden><table id="importPreviewTable"></table></div>
       <fieldset id="importModePanel" class="import-modes" hidden>
         <legend>How should the validated plan be applied?</legend>
-        <label><input type="radio" name="importMode" value="update" checked><span><strong>Update Listed Machines Only</strong><small>Only machines present in the file will have their draft periods replaced.</small></span></label>
-        <label><input type="radio" name="importMode" value="replace"><span><strong>Replace Entire Draft Plan</strong><small>All current draft machine periods will be cleared, then the file will be applied.</small></span></label>
+        <label><input type="radio" name="importMode" value="update" checked><span><strong>Update Listed Machines Only</strong><small>Imported machine periods are replaced; missing machine IDs are added automatically.</small></span></label>
+        <label><input type="radio" name="importMode" value="replace"><span><strong>Replace Entire Draft Plan</strong><small>All current draft periods are cleared, missing machines are added, then the file is applied.</small></span></label>
       </fieldset>
       <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="applyImportBtn" class="btn primary" value="default" type="button" disabled>Apply to Draft</button></div>
     </form>
@@ -237,7 +207,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="/vendor/firebase-compat.js"></script>
   <script src="/vendor/exceljs.min.js"></script>
   <script src="/excel-import.js"></script>
   <script src="/app.js"></script>
