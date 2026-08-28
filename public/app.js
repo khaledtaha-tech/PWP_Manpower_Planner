@@ -202,6 +202,52 @@ async function handleLogin(event) {
   }
 }
 
+function togglePasswordVisibility(button) {
+  const input = $(button.dataset.passwordTarget);
+  if (!input) return;
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  button.textContent = showing ? 'Show' : 'Hide';
+  button.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+  button.title = showing ? 'Show password' : 'Hide password';
+}
+
+function openChangePasswordDialog() {
+  $('changePasswordForm').reset();
+  $('changePasswordError').hidden = true;
+  $('changePasswordDialog').showModal();
+}
+
+async function changeOwnPassword() {
+  const currentPassword = $('currentPassword').value;
+  const newPassword = $('newPassword').value;
+  const confirmation = $('confirmNewPassword').value;
+  const errorBox = $('changePasswordError');
+  errorBox.hidden = true;
+  if (newPassword !== confirmation) {
+    errorBox.hidden = false;
+    errorBox.textContent = 'New password and confirmation do not match.';
+    return;
+  }
+  const button = $('savePasswordBtn');
+  setButtonLoading(button, true, 'Changing…');
+  try {
+    await fetchJson('/api/me/password', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    $('changePasswordDialog').close();
+    $('changePasswordForm').reset();
+    toast('Password changed successfully.', 'success');
+  } catch (error) {
+    errorBox.hidden = false;
+    errorBox.textContent = error.message;
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 async function logout() {
   if (dirty && !confirm('You have unsaved draft changes. Sign out and discard them?')) return;
   setStoredToken('');
@@ -888,6 +934,10 @@ document.addEventListener('DOMContentLoaded', () => {
   $('themeToggle')?.addEventListener('click', toggleTheme);
   $('loginThemeToggle')?.addEventListener('click', toggleTheme);
   $('loginForm')?.addEventListener('submit', handleLogin);
+  document.querySelectorAll('[data-password-target]').forEach(button => button.addEventListener('click', () => togglePasswordVisibility(button)));
+  $('forgotPasswordBtn')?.addEventListener('click', () => $('forgotPasswordDialog').showModal());
+  $('changePasswordBtn')?.addEventListener('click', openChangePasswordDialog);
+  $('savePasswordBtn')?.addEventListener('click', changeOwnPassword);
   $('logoutBtn')?.addEventListener('click', logout);
   $('saveDraftBtn')?.addEventListener('click', () => saveDraft().catch(() => {}));
   $('publishBtn')?.addEventListener('click', publishPlan);

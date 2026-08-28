@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
-    "create:first-admin": "node scripts/create-first-admin.js"
+    "create:first-admin": "node scripts/create-first-admin.js",
+    "reset:password": "node scripts/reset-user-password.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

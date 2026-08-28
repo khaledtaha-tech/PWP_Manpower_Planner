@@ -149,6 +149,38 @@ class AuthService {
     };
   }
 
+  async changePassword(id, currentPassword, newPassword) {
+    const userId = Number(id);
+    if (!Number.isSafeInteger(userId) || userId < 1) {
+      const err = new Error('Invalid user ID');
+      err.status = 400;
+      throw err;
+    }
+    if (!currentPassword) {
+      const err = new Error('Current password is required');
+      err.status = 400;
+      throw err;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      const err = new Error('New password must be at least 8 characters');
+      err.status = 400;
+      throw err;
+    }
+    if (currentPassword === newPassword) {
+      const err = new Error('New password must be different from the current password');
+      err.status = 400;
+      throw err;
+    }
+    const [rows] = await pool.query('SELECT password_hash FROM users WHERE id = ?', [userId]);
+    if (!rows.length || !(await bcrypt.compare(currentPassword, rows[0].password_hash))) {
+      const err = new Error('Current password is incorrect');
+      err.status = 401;
+      throw err;
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, userId]);
+  }
+
   async listUsers() {
     const [rows] = await pool.query(
       'SELECT id, email, display_name AS displayName, role, disabled, created_at AS createdAt FROM users ORDER BY email ASC'

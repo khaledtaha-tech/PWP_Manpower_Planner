@@ -25,8 +25,9 @@
       <p class="auth-intro">Sign in to view the plan and access the tools assigned to your role.</p>
       <form id="loginForm" class="auth-form">
         <label>Email address<input id="loginEmail" type="email" autocomplete="username" required placeholder="name@company.com"></label>
-        <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••"></label>
-      <div id="loginError" class="form-message error" role="alert" hidden></div>
+        <label>Password<span class="password-field"><input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••"><button class="password-toggle" type="button" data-password-target="loginPassword" aria-label="Show password" title="Show password">Show</button></span></label>
+        <button id="forgotPasswordBtn" class="auth-link forgot-link" type="button">Forgot Password?</button>
+        <div id="loginError" class="form-message error" role="alert" hidden></div>
         <div id="loginNotice" class="form-message success" role="status" hidden></div>
         <button id="loginBtn" class="btn primary wide" type="submit"><span class="button-label">Sign In</span></button>
       </form>
@@ -51,6 +52,7 @@
         <button id="themeToggle" class="btn theme-btn" title="Switch theme" aria-label="Switch theme">☾ Dark</button>
         <button id="saveDraftBtn" class="btn secondary role-planner">Save</button>
         <button id="publishBtn" class="btn primary role-planner">Publish Plan</button>
+        <button id="changePasswordBtn" class="btn ghost" type="button">Change Password</button>
         <button id="logoutBtn" class="btn ghost">Sign Out</button>
       </div>
     </header>
@@ -198,11 +200,31 @@
       <div class="dialog-head"><div><div class="eyebrow">ADMINISTRATION</div><h3>Create User</h3></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
       <label>Full Name<input id="newUserName" type="text" maxlength="100" placeholder="Employee name"></label>
       <label>Email Address<input id="newUserEmail" type="email" required placeholder="name@company.com"></label>
-      <label>Temporary Password<input id="newUserPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters"></label>
+      <label>Temporary Password<span class="password-field"><input id="newUserPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters"><button class="password-toggle" type="button" data-password-target="newUserPassword" aria-label="Show password" title="Show password">Show</button></span></label>
       <label>Role<select id="newUserRole"><option value="production_manager">Production Manager</option><option value="hr">HR</option><option value="admin">Admin</option></select></label>
       <div class="field-help">The user must sign in with this email and temporary password. There is no public sign-up.</div>
       <div id="userFormError" class="form-message error" hidden></div>
       <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="createUserBtn" class="btn primary" value="default" type="button">Create User</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="forgotPasswordDialog" class="auth-dialog">
+    <form method="dialog" class="dialog-form">
+      <div class="dialog-head"><div><div class="eyebrow">ACCOUNT RECOVERY</div><h3>Forgot Password?</h3></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
+      <p class="dialog-copy">This MySQL version does not use Firebase or Google password recovery. Ask the PWP Admin to reset your password. If you are the only Admin, use the secure Hostinger recovery command described in <strong>AUTH_SETUP.md</strong>.</p>
+      <div class="field-help">The reset command changes only the selected user's password hash. Draft plans and history are not affected.</div>
+      <div class="dialog-actions"><button class="btn primary" value="default" type="submit">OK</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="changePasswordDialog" class="auth-dialog">
+    <form method="dialog" id="changePasswordForm" class="dialog-form">
+      <div class="dialog-head"><div><div class="eyebrow">ACCOUNT SECURITY</div><h3>Change Password</h3></div><button class="icon-btn" value="cancel" type="submit">×</button></div>
+      <label>Current Password<span class="password-field"><input id="currentPassword" type="password" autocomplete="current-password" required><button class="password-toggle" type="button" data-password-target="currentPassword" aria-label="Show password" title="Show password">Show</button></span></label>
+      <label>New Password<span class="password-field"><input id="newPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="At least 8 characters"><button class="password-toggle" type="button" data-password-target="newPassword" aria-label="Show password" title="Show password">Show</button></span></label>
+      <label>Confirm New Password<span class="password-field"><input id="confirmNewPassword" type="password" autocomplete="new-password" minlength="8" required><button class="password-toggle" type="button" data-password-target="confirmNewPassword" aria-label="Show password" title="Show password">Show</button></span></label>
+      <div id="changePasswordError" class="form-message error" role="alert" hidden></div>
+      <div class="dialog-actions"><button class="btn ghost" value="cancel" type="submit">Cancel</button><button id="savePasswordBtn" class="btn primary" value="default" type="button">Change Password</button></div>
     </form>
   </dialog>
 

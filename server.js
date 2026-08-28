@@ -230,6 +230,13 @@ function createRequestHandler({
       return sendJson(res, 200, { ...user, roleLabel: roleLabel(user.role) });
     }
 
+    if (req.method === 'PATCH' && url.pathname === '/api/me/password') {
+      const user = await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR], authService);
+      const { currentPassword, newPassword } = await readBody(req);
+      await authService.changePassword(user.id, currentPassword, newPassword);
+      return sendJson(res, 200, { ok: true });
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/published') {
       await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR], authService);
       const published = await repository.getPublished();

@@ -40,8 +40,11 @@ test('authentication UI matches local MySQL and JWT capabilities', () => {
   assert.ok(app.includes("localStorage.getItem('pwp_token')"));
   assert.ok(!html.includes('Continue with Google'));
   assert.ok(!html.includes('Create Account'));
-  assert.ok(!html.includes('Forgot Password'));
+  assert.ok(html.includes('Forgot Password?'));
+  assert.ok(html.includes('data-password-target="loginPassword"'));
+  assert.ok(html.includes('id="changePasswordDialog"'));
   assert.ok(html.includes('Accounts are created and managed by the PWP Admin.'));
+  assert.ok(fs.existsSync(path.join(root, 'scripts', 'reset-user-password.js')));
 });
 
 test('server uses MySQL repository and performs server-side authorization', () => {

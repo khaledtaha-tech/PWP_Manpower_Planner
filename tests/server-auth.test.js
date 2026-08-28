@@ -33,6 +33,10 @@ function fakeAuth() {
     },
     async listUsers() { return Object.values(profiles); },
     async register(email, password, displayName, role) { return { id: 'new-user', email, displayName: displayName || '', disabled: false, role }; },
+    async changePassword(id, currentPassword, newPassword) {
+      if (!currentPassword || !newPassword) throw new HttpError(400, 'Both passwords are required', 'INVALID_PASSWORD');
+      return { id };
+    },
     async updateUser(id, input, actorId) {
       if (id === actorId) throw new HttpError(400, 'You cannot change your own role or disable your own account', 'SELF_ADMIN_CHANGE_BLOCKED');
       return { id, email: `${id}@example.com`, disabled: Boolean(input.disabled), role: input.role || ROLES.HR };
@@ -83,6 +87,7 @@ test('public health works, while protected data rejects signed-out requests', as
     assert.equal((await request(base, '/api/health')).response.status, 200);
     assert.equal((await request(base, '/api/state')).response.status, 401);
     assert.equal((await request(base, '/api/published')).response.status, 401);
+    assert.equal((await request(base, '/api/me/password', null, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: 'OldPass1', newPassword: 'NewPass1' }) })).response.status, 401);
   });
 });
 
@@ -98,6 +103,7 @@ test('a self-registered account without a role cannot access any protected appli
 test('HR can read Published Plan only and all draft/admin mutations are rejected by the server', async () => {
   await withServer(async base => {
     assert.equal((await request(base, '/api/me', 'hr-token')).response.status, 200);
+    assert.equal((await request(base, '/api/me/password', 'hr-token', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: 'OldPass1', newPassword: 'NewPass1' }) })).response.status, 200);
     assert.equal((await request(base, '/api/published', 'hr-token')).response.status, 200);
     assert.equal((await request(base, '/api/state', 'hr-token')).response.status, 403);
     assert.equal((await request(base, '/api/history', 'hr-token')).response.status, 403);

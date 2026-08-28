@@ -22,6 +22,20 @@ npm run create:first-admin
 Remove the three `FIRST_ADMIN_*` values afterward. The command never changes an
 existing user's role automatically.
 
+## Forgotten password
+
+Google sign-in and Firebase email recovery are intentionally unavailable in the
+local MySQL/JWT version. For a locked-out account, temporarily set `RESET_EMAIL`
+and `RESET_PASSWORD` in the Hostinger Node app environment, run:
+
+```bash
+npm run reset:password
+```
+
+Then remove both `RESET_*` values. The command updates only that user's bcrypt
+password hash and does not modify plans, settings, roles, or history. Once signed
+in, every user can use **Change Password** and must provide the current password.
+
 ## Access expectations
 
 - Admin: all screens and user administration.
