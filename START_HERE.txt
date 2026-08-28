@@ -30,8 +30,10 @@ EXCEL IMPORT
 2. Fill the six Plan columns without renaming them.
 3. Import and review validation, preview, and any New Machines count.
 4. Missing Machine IDs are added automatically; Lists supplies their names.
-5. Choose Update or Replace, apply to Draft, then press Save.
-6. Import never publishes automatically.
+5. Do not add Crusher rows to Plan; control it with Floating/Mandatory mode.
+6. Floating is normal surplus-only operation; Mandatory is the exception.
+7. Choose Update or Replace, apply to Draft, then press Save.
+8. Import never publishes automatically.
 
 READ NEXT
 ---------

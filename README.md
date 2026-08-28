@@ -11,7 +11,9 @@ published snapshots in MySQL. Authentication uses bcrypt password hashes and JWT
 - HR receives the latest Published Plan only; draft and administration endpoints
   return HTTP 403.
 - 14-day machine plan, daily workforce forecast, and Agency request/release plan.
-- Floating or Mandatory Crusher operation with a minimum of two workers.
+- Floating Crusher operation by default, using actual surplus only. Mandatory is
+  the exceptional mode and reserves at least two workers even when Agency labor
+  must be requested or retained.
 - Excel validation, preview and Update/Replace modes.
 - Imported machine IDs that do not yet exist are added automatically. Names and
   departments are read from the optional `Lists` sheet when available.
@@ -48,5 +50,10 @@ The `Plan` sheet must contain exactly: `Machine ID`, `Sequence`, `Status`,
 `Product`, `Duration`, and `Workers/Day`. Status is `RUN` or `STOPPED`; sequences
 start at 1 per machine; total duration per machine cannot exceed 14 days; stopped
 periods use zero workers.
+
+Crusher machines such as `L-13` remain in the machine master and `Lists` metadata,
+but must not be entered as production rows in `Plan`. Crusher allocation is
+calculated from the application-wide Floating/Mandatory switch for the full
+14-day plan.
 
 See `START_HERE.txt`, `AUTH_SETUP.md`, and `HOSTINGER_SETUP.md`.

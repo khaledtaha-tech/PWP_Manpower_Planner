@@ -62,6 +62,12 @@
     return metadata;
   }
 
+  function isCrusher(machineId, machineMap, metadata) {
+    const machine = machineMap.get(machineId) || metadata.get(machineId) || {};
+    const identity = `${machineId} ${machine.name || ''} ${machine.department || ''}`.toLowerCase();
+    return identity.includes('crusher');
+  }
+
   function validateWorkbook(workbook, machines) {
     const errors = [];
     const machineMap = new Map((machines || []).map(machine => [String(machine.id).trim(), machine]));
@@ -110,6 +116,7 @@
 
       if (!machineId) errors.push({ row: rowNumber, reason: 'Machine ID is required.' });
       else if (!/^[A-Za-z0-9._-]+$/.test(machineId) || machineId.length > 30) errors.push({ row: rowNumber, reason: 'Machine ID may contain only letters, numbers, dot, dash or underscore (maximum 30 characters).' });
+      else if (isCrusher(machineId, machineMap, metadata)) errors.push({ row: rowNumber, reason: `Machine ID "${machineId}" is the Crusher. Do not add Crusher rows to Plan; use the Mandatory/Floating switch in the application.` });
       if (sequence == null || sequence < 1) errors.push({ row: rowNumber, reason: 'Sequence must be a positive whole number starting from 1.' });
       if (status !== 'RUN' && status !== 'STOPPED') errors.push({ row: rowNumber, reason: 'Status must be RUN or STOPPED.' });
       if (status === 'RUN' && !product) errors.push({ row: rowNumber, reason: 'Product is required when Status is RUN.' });

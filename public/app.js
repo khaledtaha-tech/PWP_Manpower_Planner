@@ -245,6 +245,9 @@ async function loadState() {
   storageHealth = health;
   state.settings = normalizeWorkforceSettings(state.settings);
   state.settings.planDays = PLAN_DAYS;
+  state.machines.forEach(machine => {
+    if (isCrusherMachine(machine)) state.plans[machine.id] = [];
+  });
   renderAll();
   dirty = false;
   $('saveState').textContent = 'Draft loaded';
@@ -512,6 +515,7 @@ function renderDashboard(source = state) {
 function renderPlan() {
   const start = state.planStartDate;
   const isMandatory = state.settings.crusherMode === 'mandatory';
+  const crusherDaily = buildActions(state).daily;
   $('machinePlans').innerHTML = state.machines.map(machine => {
     const periods = getMachinePlan(machine.id);
     const used = plannedDays(machine.id);
@@ -520,7 +524,11 @@ function renderPlan() {
     const id = esc(machine.id);
     const isCrusher = isCrusherMachine(machine);
     const crusherToggleHtml = isCrusher ? `<button class="btn small ${isMandatory ? 'primary' : 'secondary'}" onclick="toggleCrusherMode()" title="Toggle Mandatory vs Auto-Surplus" style="font-weight:700;">${isMandatory ? '⚡ Mandatory: ON (Hires Agency)' : '🍃 Mandatory: OFF (Surplus Only)'}</button>` : '';
-    return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · ${used}/${PLAN_DAYS} days planned ${remaining ? `· ${remaining} unplanned` : ''}${isCrusher ? ` · Mode: ${isMandatory ? 'Mandatory (2+ workers)' : 'Auto-Surplus'}` : ''}</p></div></div><div class="machine-actions">${crusherToggleHtml}<div class="progress-line"><span style="width:${Math.min(100, used / PLAN_DAYS * 100)}%"></span></div>${remaining ? `<button class="btn small secondary" onclick="openPeriodDialog('${id}')">+ Add Period</button>` : '<span class="plan-complete">Plan Complete</span>'}${remaining ? `<button class="btn small ghost" onclick="fillStopped('${id}')">Fill ${remaining} Stopped</button>` : ''}<button class="btn small danger" onclick="clearMachinePlan('${id}')">Clear</button></div></div><div>${periods.length ? periods.map((period, index) => `<div class="segment-row"><div class="segment-kind ${period.kind}">${period.kind === 'run' ? 'RUN' : 'STOPPED'}</div><div><strong>${esc(period.product)}</strong></div><div>${period.days} day${Number(period.days) === 1 ? '' : 's'}</div><div>${period.kind === 'run' ? `${period.workers} workers/day` : '0 workers'}</div><div class="segment-actions"><button class="btn small ghost" onclick="moveSegment('${id}',${index},-1)" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" onclick="moveSegment('${id}',${index},1)" ${index === periods.length - 1 ? 'disabled' : ''}>↓</button><button class="btn small secondary" onclick="openPeriodDialog('${id}',${index})">Edit</button><button class="btn small danger" onclick="deleteSegment('${id}',${index})">Delete</button></div></div>`).join('') : '<div class="empty">No periods yet. Add a production run or stopped period.</div>'}</div><div class="timeline">${expanded.map((cell, index) => `<div class="day-cell ${cell.kind}" title="${esc(cell.product)} · ${cell.workers} workers"><span class="n">${fmtDate(addDays(start, index), true)}</span>${cell.kind === 'run' ? esc(cell.workers) : cell.kind === 'stopped' ? 'STOP' : '?'}</div>`).join('')}</div></div>`;
+    if (isCrusher) {
+      const crusherTimeline = crusherDaily.map((row, index) => `<div class="day-cell ${row.crusherAssigned > 0 ? 'run' : 'stopped'}" title="${row.crusherAssigned > 0 ? `Crusher covered by ${row.crusherAssigned} worker(s)` : `Crusher shortage: ${row.crusherShortage}`}"><span class="n">${fmtDate(addDays(start, index), true)}</span>${row.crusherAssigned > 0 ? row.crusherAssigned : 'STOP'}</div>`).join('');
+      return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · Controlled automatically · ${isMandatory ? `Mandatory (${state.settings.crusherWorkers}+ workers reserved)` : 'Floating (actual surplus only)'}</p></div></div><div class="machine-actions">${crusherToggleHtml}<span class="plan-complete">Mode-controlled</span></div></div><div class="empty">Do not add RUN/STOPPED periods for the Crusher. Use the switch above, then Redistribute to recalculate Agency actions.</div><div class="timeline">${crusherTimeline}</div></div>`;
+    }
+    return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · ${used}/${PLAN_DAYS} days planned ${remaining ? `· ${remaining} unplanned` : ''}</p></div></div><div class="machine-actions"><div class="progress-line"><span style="width:${Math.min(100, used / PLAN_DAYS * 100)}%"></span></div>${remaining ? `<button class="btn small secondary" onclick="openPeriodDialog('${id}')">+ Add Period</button>` : '<span class="plan-complete">Plan Complete</span>'}${remaining ? `<button class="btn small ghost" onclick="fillStopped('${id}')">Fill ${remaining} Stopped</button>` : ''}<button class="btn small danger" onclick="clearMachinePlan('${id}')">Clear</button></div></div><div>${periods.length ? periods.map((period, index) => `<div class="segment-row"><div class="segment-kind ${period.kind}">${period.kind === 'run' ? 'RUN' : 'STOPPED'}</div><div><strong>${esc(period.product)}</strong></div><div>${period.days} day${Number(period.days) === 1 ? '' : 's'}</div><div>${period.kind === 'run' ? `${period.workers} workers/day` : '0 workers'}</div><div class="segment-actions"><button class="btn small ghost" onclick="moveSegment('${id}',${index},-1)" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" onclick="moveSegment('${id}',${index},1)" ${index === periods.length - 1 ? 'disabled' : ''}>↓</button><button class="btn small secondary" onclick="openPeriodDialog('${id}',${index})">Edit</button><button class="btn small danger" onclick="deleteSegment('${id}',${index})">Delete</button></div></div>`).join('') : '<div class="empty">No periods yet. Add a production run or stopped period.</div>'}</div><div class="timeline">${expanded.map((cell, index) => `<div class="day-cell ${cell.kind}" title="${esc(cell.product)} · ${cell.workers} workers"><span class="n">${fmtDate(addDays(start, index), true)}</span>${cell.kind === 'run' ? esc(cell.workers) : cell.kind === 'stopped' ? 'STOP' : '?'}</div>`).join('')}</div></div>`;
   }).join('');
 }
 
@@ -621,8 +629,9 @@ function renderHistory() {
 
 function openPeriodDialog(machineId, index = '') {
   if (!isPlanner()) return;
-  if (index === '' && plannedDays(machineId) >= PLAN_DAYS) return toast('This machine plan is already complete.', 'error');
   const machine = state.machines.find(item => item.id === machineId);
+  if (isCrusherMachine(machine)) return toast('Crusher is controlled by Mandatory/Floating mode, not production periods.', 'error');
+  if (index === '' && plannedDays(machineId) >= PLAN_DAYS) return toast('This machine plan is already complete.', 'error');
   const period = index === '' ? null : getMachinePlan(machineId)[Number(index)];
   $('periodMachineId').value = machineId;
   $('periodIndex').value = index;

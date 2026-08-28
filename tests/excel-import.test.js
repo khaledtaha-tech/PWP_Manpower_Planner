@@ -10,6 +10,13 @@ const machines = [
   { id: 'L-03', name: 'Line 3' }
 ];
 
+const factoryMachines = [
+  ['L-01', 'Kabra 90', 'HDPE'], ['L-02', 'Beier 2', 'PPR'], ['L-03', 'Wend 2', 'HDPE'],
+  ['L-04', 'Wend 1', 'HDPE'], ['L-05', 'Beier 1', 'PPR'], ['L-06', 'Duct 1', 'PVC'],
+  ['L-07', 'Sheeting 1', 'Sheeting'], ['L-08', 'Duct 2', 'PVC'], ['L-09', 'Sheeting 2', 'Sheeting'],
+  ['L-10', 'COD', 'HDPE'], ['L-11', 'Tongda', 'PVC'], ['L-12', 'DWC', 'DWC'], ['L-13', 'Crusher', 'Crusher']
+].map(([id, name, department], index) => ({ id, name, department, sortOrder: index + 1 }));
+
 function workbook(rows, sheetName = 'Plan') {
   const book = new ExcelJS.Workbook();
   const sheet = book.addWorksheet(sheetName);
@@ -36,14 +43,13 @@ test('downloadable project template contains the required sheets and imports suc
   const templatePath = path.join(__dirname, '..', 'public', 'assets', 'PWP_14_Day_Plan_Upload_Template.xlsx');
   const template = new ExcelJS.Workbook();
   await template.xlsx.readFile(templatePath);
-  assert.deepEqual(template.worksheets.map(sheet => sheet.name), ['Plan', 'Instructions', 'Lists']);
-  const result = validateWorkbook(template, [
-    { id: 'L-01', name: 'Kabra 90' }, { id: 'L-02', name: 'Beier 2' }, ...machines.slice(2)
-  ]);
+  assert.deepEqual(template.worksheets.map(sheet => sheet.name), ['Plan', 'Instructions', 'Lists', 'Scenario Comparison', 'Mandatory Crusher', 'Floating Crusher']);
+  const result = validateWorkbook(template, factoryMachines);
   assert.equal(result.valid, true);
-  assert.equal(result.summary.rows, 5);
-  assert.deepEqual(result.summary.newMachines.map(machine => machine.id), ['L-13']);
-  assert.equal(result.summary.newMachines[0].name, 'Crusher');
+  assert.equal(result.summary.rows, 17);
+  assert.equal(result.summary.machines, 12);
+  assert.deepEqual(result.summary.newMachines, []);
+  assert.equal(result.records.some(record => record.machineId === 'L-13'), false);
 });
 
 test('validator returns all row-specific errors without applying anything', () => {
@@ -67,15 +73,15 @@ test('validator returns all row-specific errors without applying anything', () =
 test('unknown valid machine IDs are previewed and created automatically from Lists metadata', () => {
   const book = workbook([
     HEADERS,
-    ['L-13', 1, 'RUN', 'Crushing / Support', 14, 2]
+    ['L-14', 1, 'RUN', 'New Production', 14, 2]
   ]);
   const lists = book.addWorksheet('Lists');
   lists.addRow(['Status', '', 'Machine ID', 'Machine Name', 'Department']);
-  lists.addRow(['RUN', '', 'L-13', 'Crusher', 'Crusher']);
+  lists.addRow(['RUN', '', 'L-14', 'New Line', 'Expansion']);
   const result = validateWorkbook(book, [{ id: 'M1', name: 'Legacy placeholder', sortOrder: 1 }]);
   assert.equal(result.valid, true);
   assert.deepEqual(result.summary.newMachines, [{
-    id: 'L-13', name: 'Crusher', department: 'Crusher', defaultProduct: 'Crushing / Support'
+    id: 'L-14', name: 'New Line', department: 'Expansion', defaultProduct: 'New Production'
   }]);
   const state = {
     machines: [{ id: 'M1', name: 'Legacy placeholder', sortOrder: 1 }],
@@ -84,10 +90,20 @@ test('unknown valid machine IDs are previewed and created automatically from Lis
     history: [{ id: 'KEEP' }]
   };
   applyImportToDraft(state, result, 'update');
-  assert.equal(state.machines.find(machine => machine.id === 'L-13').name, 'Crusher');
-  assert.equal(state.machines.find(machine => machine.id === 'L-13').sortOrder, 2);
-  assert.equal(state.plans['L-13'][0].workers, 2);
+  assert.equal(state.machines.find(machine => machine.id === 'L-14').name, 'New Line');
+  assert.equal(state.machines.find(machine => machine.id === 'L-14').sortOrder, 2);
+  assert.equal(state.plans['L-14'][0].workers, 2);
   assert.deepEqual(state.history, [{ id: 'KEEP' }]);
+});
+
+test('Crusher rows are rejected because Crusher is controlled by application mode', () => {
+  const book = workbook([
+    HEADERS,
+    ['L-13', 1, 'RUN', 'Crushing / Support', 14, 2]
+  ]);
+  const result = validateWorkbook(book, factoryMachines);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some(error => error.row === 2 && error.reason.includes('Mandatory/Floating')));
 });
 
 test('missing Plan sheet and wrong headers are rejected', () => {

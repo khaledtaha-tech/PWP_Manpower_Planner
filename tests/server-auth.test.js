@@ -121,6 +121,10 @@ test('Production Manager can save/publish draft but cannot manage users', async 
     invalidCrusher.settings.crusherWorkers = 0;
     invalidCrusher.settings.floatingLimit = 0;
     assert.equal((await request(base, '/api/state', 'pm-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(invalidCrusher) })).response.status, 400);
+    const crusherPeriod = structuredClone(current.body);
+    crusherPeriod.machines.push({ id: 'L-13', name: 'Crusher', department: 'Crusher', defaultProduct: 'Crushing', sortOrder: 13 });
+    crusherPeriod.plans['L-13'] = [{ kind: 'run', product: 'Crushing', days: 14, workers: 2 }];
+    assert.equal((await request(base, '/api/state', 'pm-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(crusherPeriod) })).response.status, 400);
     assert.equal((await request(base, '/api/publish', 'pm-token', { method: 'POST' })).response.status, 200);
     assert.equal((await request(base, '/api/history', 'pm-token')).response.status, 200);
     assert.equal((await request(base, '/api/admin/users', 'pm-token')).response.status, 403);

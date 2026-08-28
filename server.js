@@ -142,6 +142,10 @@ function sanitizeDraftState(input, current) {
     if (!Array.isArray(rawSegments)) {
       throw new HttpError(400, `Plan for machine ${machine.id} must be a list`, 'INVALID_STATE');
     }
+    const machineIdentity = `${machine.id} ${machine.name} ${machine.department || ''}`.toLowerCase();
+    if (machineIdentity.includes('crusher') && rawSegments.length) {
+      throw new HttpError(400, `Crusher ${machine.id} is controlled by Mandatory/Floating mode and cannot contain production periods`, 'INVALID_STATE');
+    }
     let totalDays = 0;
     plans[machine.id] = rawSegments.map((segment, index) => {
       if (!segment || typeof segment !== 'object' || Array.isArray(segment)) {
