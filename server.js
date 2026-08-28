@@ -365,6 +365,8 @@ function startServer() {
   return server;
 }
 
-if (require.main === module) startServer();
+// Hostinger loads the entry file through its own runner, so require.main is not
+// this module there. Start whenever this is not a Node test worker.
+if (!process.env.NODE_TEST_CONTEXT) startServer();
 
 module.exports = { createServer, createRequestHandler, HttpError, ROLES, sanitizeDraftState, buildSnapshot };
