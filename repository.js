@@ -89,11 +89,31 @@ const repository = {
     const currentState = await this.getState();
     const snapshot = buildSnapshotFn(currentState);
     const json = JSON.stringify(snapshot);
-    await pool.query('INSERT INTO history (snapshot_id, published_at, data) VALUES (?, ?, ?)', [
-      snapshot.id,
-      new Date(),
-      json
-    ]);
+    const [columnRows] = await pool.query('SHOW COLUMNS FROM history');
+    const columns = new Set(columnRows.map(column => String(column.Field || column.COLUMN_NAME || '').toLowerCase()));
+    if (!columns.has('data')) {
+      throw new Error('The history table must contain a data column');
+    }
+
+    // Existing Hostinger databases may use the original minimal history table
+    // (id, data, created_at). New installations also store searchable metadata.
+    const insertColumns = [];
+    const values = [];
+    if (columns.has('snapshot_id')) {
+      insertColumns.push('snapshot_id');
+      values.push(snapshot.id);
+    }
+    if (columns.has('published_at')) {
+      insertColumns.push('published_at');
+      values.push(new Date());
+    }
+    insertColumns.push('data');
+    values.push(json);
+
+    await pool.query(
+      `INSERT INTO history (${insertColumns.join(', ')}) VALUES (${insertColumns.map(() => '?').join(', ')})`,
+      values
+    );
     return snapshot;
   },
 
