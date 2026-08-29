@@ -57,3 +57,60 @@ test('legacy placeholder state with real plan data is never auto-migrated', asyn
     delete require.cache[require.resolve('../repository')];
   }
 });
+
+test('publishing supports the original minimal history table without metadata columns', async () => {
+  const originalQuery = pool.query;
+  const state = {
+    planStartDate: '2026-08-29',
+    settings: {},
+    machines: [],
+    plans: {}
+  };
+  const writes = [];
+  pool.query = async (sql, parameters) => {
+    if (sql.startsWith('SELECT data FROM app_state')) return [[{ data: state }]];
+    if (sql === 'SHOW COLUMNS FROM history') {
+      return [[{ Field: 'id' }, { Field: 'data' }, { Field: 'created_at' }]];
+    }
+    writes.push({ sql, parameters });
+    return [{ affectedRows: 1 }];
+  };
+  delete require.cache[require.resolve('../repository')];
+  const repository = require('../repository');
+  try {
+    const snapshot = await repository.publish(current => ({ ...current, id: 'PUB-LEGACY' }));
+    assert.equal(snapshot.id, 'PUB-LEGACY');
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].sql, 'INSERT INTO history (data) VALUES (?)');
+    assert.equal(JSON.parse(writes[0].parameters[0]).id, 'PUB-LEGACY');
+  } finally {
+    pool.query = originalQuery;
+    delete require.cache[require.resolve('../repository')];
+  }
+});
+
+test('publishing uses metadata columns when the current history schema provides them', async () => {
+  const originalQuery = pool.query;
+  const state = { planStartDate: '2026-08-29', settings: {}, machines: [], plans: {} };
+  const writes = [];
+  pool.query = async (sql, parameters) => {
+    if (sql.startsWith('SELECT data FROM app_state')) return [[{ data: state }]];
+    if (sql === 'SHOW COLUMNS FROM history') {
+      return [[{ Field: 'id' }, { Field: 'snapshot_id' }, { Field: 'published_at' }, { Field: 'data' }]];
+    }
+    writes.push({ sql, parameters });
+    return [{ affectedRows: 1 }];
+  };
+  delete require.cache[require.resolve('../repository')];
+  const repository = require('../repository');
+  try {
+    await repository.publish(current => ({ ...current, id: 'PUB-CURRENT' }));
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].sql, 'INSERT INTO history (snapshot_id, published_at, data) VALUES (?, ?, ?)');
+    assert.equal(writes[0].parameters[0], 'PUB-CURRENT');
+    assert.ok(writes[0].parameters[1] instanceof Date);
+  } finally {
+    pool.query = originalQuery;
+    delete require.cache[require.resolve('../repository')];
+  }
+});
