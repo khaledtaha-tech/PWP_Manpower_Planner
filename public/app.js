@@ -12,6 +12,7 @@ let adminUsers = [];
 let pendingImport = null;
 let toastTimer = null;
 let authNotice = '';
+let serviceAccess = null;
 const readOnlyMode = new URLSearchParams(location.search).get('view') === 'published';
 
 const $ = id => document.getElementById(id);
@@ -19,6 +20,8 @@ const esc = (value = '') => String(value).replace(/[&<>"']/g, character => ({ '&
 const roleLabel = role => ({ admin: 'Admin', production_manager: 'Production Manager', hr: 'HR' })[role] || role || 'No role';
 const isPlanner = () => currentProfile && (currentProfile.role === ROLE_ADMIN || currentProfile.role === ROLE_PRODUCTION_MANAGER);
 const isAdmin = () => currentProfile?.role === ROLE_ADMIN;
+const isPilotReadOnly = () => Boolean(serviceAccess?.readOnly);
+const canWrite = () => isPlanner() && !readOnlyMode && !isPilotReadOnly();
 
 function getStoredToken() {
   return localStorage.getItem('pwp_token') || '';
@@ -106,7 +109,7 @@ function setButtonLoading(button, loading, label) {
 }
 
 function markDirty() {
-  if (!isPlanner()) return;
+  if (!canWrite()) return;
   dirty = true;
   $('saveState').textContent = 'Unsaved changes';
   $('saveState').classList.add('unsaved');
@@ -168,11 +171,26 @@ function showApp() {
   $('appShell').hidden = false;
 }
 
+function renderPilotAccess() {
+  const banner = $('pilotBanner');
+  if (!banner || !serviceAccess?.pilotEndDate) return;
+  const endDate = fmtDate(serviceAccess.pilotEndDate);
+  banner.hidden = false;
+  banner.classList.toggle('expired', isPilotReadOnly());
+  banner.innerHTML = isPilotReadOnly()
+    ? `<strong>Pilot period ended · Read-only access</strong><span>Editing and publishing are disabled. Saved and published data remain available.</span>`
+    : `<strong>Pilot access · ${serviceAccess.daysRemaining} day${serviceAccess.daysRemaining === 1 ? '' : 's'} remaining</strong><span>Full access is active through ${esc(endDate)}.</span>`;
+  document.body.classList.toggle('pilot-readonly', isPilotReadOnly());
+  document.querySelectorAll('.write-control').forEach(element => { element.hidden = !canWrite(); });
+  document.querySelectorAll('#settingsForm input, #settingsForm button, #planStartDate').forEach(element => { element.disabled = !canWrite(); });
+}
+
 function applyRoleInterface() {
   const plannerVisible = isPlanner() && !readOnlyMode;
   document.querySelectorAll('.role-planner').forEach(element => { element.hidden = !plannerVisible; });
   document.querySelectorAll('.role-admin').forEach(element => { element.hidden = !isAdmin() || readOnlyMode; });
   $('userBadge').innerHTML = `<strong>${esc(currentProfile.displayName || currentProfile.email)}</strong><span>${esc(currentProfile.roleLabel || roleLabel(currentProfile.role))}</span>`;
+  renderPilotAccess();
   if (!plannerVisible) switchTab('published');
   else switchTab('dashboard');
 }
@@ -266,6 +284,7 @@ async function initializeAuthentication() {
   }
   try {
     currentProfile = await fetchJson('/api/me');
+    serviceAccess = currentProfile.service || null;
     authNotice = '';
     applyRoleInterface();
     showApp();
@@ -314,7 +333,7 @@ async function loadPublishedOnly() {
 }
 
 async function saveDraft(showToast = true) {
-  if (!isPlanner()) return toast('You do not have permission to save the draft.', 'error');
+  if (!canWrite()) return toast(isPilotReadOnly() ? 'The pilot period has ended. The application is read only.' : 'You do not have permission to save the draft.', 'error');
   const button = $('saveDraftBtn');
   setButtonLoading(button, true, 'Saving…');
   try {
@@ -342,7 +361,7 @@ async function saveDraft(showToast = true) {
 }
 
 async function publishPlan() {
-  if (!isPlanner()) return toast('You do not have permission to publish.', 'error');
+  if (!canWrite()) return toast(isPilotReadOnly() ? 'The pilot period has ended. Publishing is disabled.' : 'You do not have permission to publish.', 'error');
   const button = $('publishBtn');
   setButtonLoading(button, true, 'Publishing…');
   try {
@@ -535,10 +554,11 @@ function renderAll() {
   renderMachines();
   renderPublished();
   renderHistory();
+  renderPilotAccess();
 }
 
 function redistributeWorkforce() {
-  if (!isPlanner()) return toast('You do not have permission to redistribute the workforce.', 'error');
+  if (!canWrite()) return toast('The application is read only.', 'error');
   renderAll();
   const { daily } = buildActions(state);
   const crusherDays = daily.filter(row => row.crusherAssigned > 0).length;
@@ -590,17 +610,17 @@ function renderPlan() {
     const expanded = expandMachine(machine);
     const id = esc(machine.id);
     const isCrusher = isCrusherMachine(machine);
-    const crusherToggleHtml = isCrusher ? `<button class="btn small ${isMandatory ? 'primary' : 'secondary'}" onclick="toggleCrusherMode()" title="Toggle Mandatory vs Auto-Surplus" style="font-weight:700;">${isMandatory ? '⚡ Mandatory: ON (Hires Agency)' : '🍃 Mandatory: OFF (Surplus Only)'}</button>` : '';
+    const crusherToggleHtml = isCrusher ? `<button class="btn small write-control ${isMandatory ? 'primary' : 'secondary'}" onclick="toggleCrusherMode()" title="Toggle Mandatory vs Auto-Surplus" style="font-weight:700;">${isMandatory ? '⚡ Mandatory: ON (Hires Agency)' : '🍃 Mandatory: OFF (Surplus Only)'}</button>` : '';
     if (isCrusher) {
       const crusherTimeline = crusherDaily.map((row, index) => `<div class="day-cell ${row.crusherAssigned > 0 ? 'run' : 'stopped'}" title="${row.crusherAssigned > 0 ? `Crusher covered by ${row.crusherAssigned} worker(s)` : `Crusher shortage: ${row.crusherShortage}`}"><span class="n">${fmtDate(addDays(start, index), true)}</span>${row.crusherAssigned > 0 ? row.crusherAssigned : 'STOP'}</div>`).join('');
       return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · Controlled automatically · ${isMandatory ? `Mandatory (${state.settings.crusherWorkers}+ workers reserved)` : 'Floating (actual surplus only)'}</p></div></div><div class="machine-actions">${crusherToggleHtml}<span class="plan-complete">Mode-controlled</span></div></div><div class="empty">Do not add RUN/STOPPED periods for the Crusher. Use the switch above, then Redistribute to recalculate Agency actions.</div><div class="timeline">${crusherTimeline}</div></div>`;
     }
-    return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · ${used}/${PLAN_DAYS} days planned ${remaining ? `· ${remaining} unplanned` : ''}</p></div></div><div class="machine-actions"><div class="progress-line"><span style="width:${Math.min(100, used / PLAN_DAYS * 100)}%"></span></div>${remaining ? `<button class="btn small secondary" onclick="openPeriodDialog('${id}')">+ Add Period</button>` : '<span class="plan-complete">Plan Complete</span>'}${remaining ? `<button class="btn small ghost" onclick="fillStopped('${id}')">Fill ${remaining} Stopped</button>` : ''}<button class="btn small danger" onclick="clearMachinePlan('${id}')">Clear</button></div></div><div>${periods.length ? periods.map((period, index) => `<div class="segment-row"><div class="segment-kind ${period.kind}">${period.kind === 'run' ? 'RUN' : 'STOPPED'}</div><div><strong>${esc(period.product)}</strong></div><div>${period.days} day${Number(period.days) === 1 ? '' : 's'}</div><div>${period.kind === 'run' ? `${period.workers} workers/day` : '0 workers'}</div><div class="segment-actions"><button class="btn small ghost" onclick="moveSegment('${id}',${index},-1)" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" onclick="moveSegment('${id}',${index},1)" ${index === periods.length - 1 ? 'disabled' : ''}>↓</button><button class="btn small secondary" onclick="openPeriodDialog('${id}',${index})">Edit</button><button class="btn small danger" onclick="deleteSegment('${id}',${index})">Delete</button></div></div>`).join('') : '<div class="empty">No periods yet. Add a production run or stopped period.</div>'}</div><div class="timeline">${expanded.map((cell, index) => `<div class="day-cell ${cell.kind}" title="${esc(cell.product)} · ${cell.workers} workers"><span class="n">${fmtDate(addDays(start, index), true)}</span>${cell.kind === 'run' ? esc(cell.workers) : cell.kind === 'stopped' ? 'STOP' : '?'}</div>`).join('')}</div></div>`;
+    return `<div class="machine-card"><div class="machine-header"><div class="machine-title"><span class="machine-code">${id}</span><div><h3>${esc(machine.name)}</h3><p>${esc(machine.department || '')} · ${used}/${PLAN_DAYS} days planned ${remaining ? `· ${remaining} unplanned` : ''}</p></div></div><div class="machine-actions"><div class="progress-line"><span style="width:${Math.min(100, used / PLAN_DAYS * 100)}%"></span></div>${remaining ? `<button class="btn small secondary write-control" onclick="openPeriodDialog('${id}')">+ Add Period</button>` : '<span class="plan-complete">Plan Complete</span>'}${remaining ? `<button class="btn small ghost write-control" onclick="fillStopped('${id}')">Fill ${remaining} Stopped</button>` : ''}<button class="btn small danger write-control" onclick="clearMachinePlan('${id}')">Clear</button></div></div><div>${periods.length ? periods.map((period, index) => `<div class="segment-row"><div class="segment-kind ${period.kind}">${period.kind === 'run' ? 'RUN' : 'STOPPED'}</div><div><strong>${esc(period.product)}</strong></div><div>${period.days} day${Number(period.days) === 1 ? '' : 's'}</div><div>${period.kind === 'run' ? `${period.workers} workers/day` : '0 workers'}</div><div class="segment-actions write-control"><button class="btn small ghost" onclick="moveSegment('${id}',${index},-1)" ${index === 0 ? 'disabled' : ''}>↑</button><button class="btn small ghost" onclick="moveSegment('${id}',${index},1)" ${index === periods.length - 1 ? 'disabled' : ''}>↓</button><button class="btn small secondary" onclick="openPeriodDialog('${id}',${index})">Edit</button><button class="btn small danger" onclick="deleteSegment('${id}',${index})">Delete</button></div></div>`).join('') : '<div class="empty">No periods yet. Add a production run or stopped period.</div>'}</div><div class="timeline">${expanded.map((cell, index) => `<div class="day-cell ${cell.kind}" title="${esc(cell.product)} · ${cell.workers} workers"><span class="n">${fmtDate(addDays(start, index), true)}</span>${cell.kind === 'run' ? esc(cell.workers) : cell.kind === 'stopped' ? 'STOP' : '?'}</div>`).join('')}</div></div>`;
   }).join('');
 }
 
 function toggleCrusherMode() {
-  if (!isPlanner()) return;
+  if (!canWrite()) return toast('The application is read only.', 'error');
   const newMode = state.settings.crusherMode === 'mandatory' ? 'floating' : 'mandatory';
   setCrusherMode(newMode);
   toast(`Crusher mode set to ${newMode === 'mandatory' ? 'MANDATORY (ON) - System will hire/retain Agency workers if needed.' : 'MANDATORY (OFF) - Crusher will only run from surplus workers.'}`, 'info');
@@ -654,6 +674,7 @@ function mandatoryModeLabel(mode) {
 
 function setCrusherMode(mode, mark = true) {
   if (!state?.settings) return;
+  if (mark && !canWrite()) return toast('The application is read only.', 'error');
   state.settings.crusherMode = mode === 'mandatory' ? 'mandatory' : 'floating';
   $('crusherMandatoryBtn')?.classList.toggle('active', state.settings.crusherMode === 'mandatory');
   $('crusherFloatingBtn')?.classList.toggle('active', state.settings.crusherMode === 'floating');
@@ -664,7 +685,7 @@ function setCrusherMode(mode, mark = true) {
 }
 
 function renderMachines() {
-  $('machinesTable').innerHTML = `<thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Default Product</th><th>Actions</th></tr></thead><tbody>${state.machines.map(machine => `<tr><td><strong>${esc(machine.id)}</strong></td><td>${esc(machine.name)}</td><td>${esc(machine.department)}</td><td>${esc(machine.defaultProduct)}</td><td><button class="btn small secondary" onclick="openMachineDialog('${esc(machine.id)}')">Edit</button> <button class="btn small danger" onclick="deleteMachine('${esc(machine.id)}')">Delete</button></td></tr>`).join('')}</tbody>`;
+  $('machinesTable').innerHTML = `<thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Default Product</th><th>Actions</th></tr></thead><tbody>${state.machines.map(machine => `<tr><td><strong>${esc(machine.id)}</strong></td><td>${esc(machine.name)}</td><td>${esc(machine.department)}</td><td>${esc(machine.defaultProduct)}</td><td><span class="write-control"><button class="btn small secondary" onclick="openMachineDialog('${esc(machine.id)}')">Edit</button> <button class="btn small danger" onclick="deleteMachine('${esc(machine.id)}')">Delete</button></span></td></tr>`).join('')}</tbody>`;
 }
 
 function publishedHtml(published) {
@@ -673,8 +694,19 @@ function publishedHtml(published) {
   const peak = Math.max(...daily.map(row => row.requiredAgency), 0);
   const start = published.planStartDate;
   const end = addDays(start, PLAN_DAYS - 1);
-  return `<div class="readonly-banner">Published plan · Read only · ${fmtDateTime(published.publishedAt)}</div><div class="section-head"><div><h2>Published Manpower Plan</h2><p>${fmtDate(start)} → ${fmtDate(end)} · ${PLAN_DAYS} days</p></div></div><div class="kpi-grid"><div class="kpi"><div class="label">Company Workers</div><div class="value">${published.settings.companyWorkers}</div><div class="sub">Fixed daily capacity</div></div><div class="kpi"><div class="label">Agency at Publish</div><div class="value">${published.settings.currentAgency}</div><div class="sub">Starting level</div></div><div class="kpi"><div class="label">Peak Agency Need</div><div class="value">${peak}</div><div class="sub">14-day forecast</div></div><div class="kpi"><div class="label">Actions</div><div class="value">${actions.length}</div><div class="sub">Request / release</div></div><div class="kpi"><div class="label">Crusher Mode</div><div class="value">${mandatoryModeLabel(published.settings.crusherMode)}</div><div class="sub">${published.settings.crusherWorkers} workers</div></div></div><div class="card"><div class="card-head"><div><h3>Agency Action Plan</h3><p>Official published recommendation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Qty</th><th>Agency Level</th><th>Effective</th><th>Notice By</th><th>Reason</th></tr></thead><tbody>${actions.length ? actions.map(action => `<tr><td class="${action.type === 'REQUEST' ? 'action-request' : 'action-release'}">${action.type}</td><td><strong>${action.type === 'REQUEST' ? '+' : '-'}${action.qty}</strong></td><td>${action.from} → <strong>${action.to}</strong></td><td>${fmtDate(action.effective)}</td><td>${fmtDate(action.noticeBy)}</td><td>${esc(action.reason)}</td></tr>`).join('') : '<tr><td colspan="6"><span class="badge good">KEEP CURRENT WORKFORCE</span> No agency change is required.</td></tr>'}</tbody></table></div></div><div class="card"><div class="card-head"><div><h3>Daily Forecast</h3><p>Production requirement, Agency level, and Crusher allocation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Mode</th><th>Crusher Assigned</th></tr></thead><tbody>${daily.map(row => `<tr><td>${fmtDate(row.date, true)}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td>${row.requiredAgency}</td><td>${row.projectedAgency}</td><td>${mandatoryModeLabel(row.crusherMode)}</td><td>${row.crusherAssigned}</td></tr>`).join('')}</tbody></table></div></div>`;
+  return `<div class="readonly-banner">Published plan · Read only · ${fmtDateTime(published.publishedAt)}</div><div class="section-head"><div><h2>Published Manpower Plan</h2><p>${fmtDate(start)} → ${fmtDate(end)} · ${PLAN_DAYS} days</p></div><button class="btn secondary" type="button" onclick="exportPublishedData()">Export Saved Data</button></div><div class="kpi-grid"><div class="kpi"><div class="label">Company Workers</div><div class="value">${published.settings.companyWorkers}</div><div class="sub">Fixed daily capacity</div></div><div class="kpi"><div class="label">Agency at Publish</div><div class="value">${published.settings.currentAgency}</div><div class="sub">Starting level</div></div><div class="kpi"><div class="label">Peak Agency Need</div><div class="value">${peak}</div><div class="sub">14-day forecast</div></div><div class="kpi"><div class="label">Actions</div><div class="value">${actions.length}</div><div class="sub">Request / release</div></div><div class="kpi"><div class="label">Crusher Mode</div><div class="value">${mandatoryModeLabel(published.settings.crusherMode)}</div><div class="sub">${published.settings.crusherWorkers} workers</div></div></div><div class="card"><div class="card-head"><div><h3>Agency Action Plan</h3><p>Official published recommendation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Action</th><th>Qty</th><th>Agency Level</th><th>Effective</th><th>Notice By</th><th>Reason</th></tr></thead><tbody>${actions.length ? actions.map(action => `<tr><td class="${action.type === 'REQUEST' ? 'action-request' : 'action-release'}">${action.type}</td><td><strong>${action.type === 'REQUEST' ? '+' : '-'}${action.qty}</strong></td><td>${action.from} → <strong>${action.to}</strong></td><td>${fmtDate(action.effective)}</td><td>${fmtDate(action.noticeBy)}</td><td>${esc(action.reason)}</td></tr>`).join('') : '<tr><td colspan="6"><span class="badge good">KEEP CURRENT WORKFORCE</span> No agency change is required.</td></tr>'}</tbody></table></div></div><div class="card"><div class="card-head"><div><h3>Daily Forecast</h3><p>Production requirement, Agency level, and Crusher allocation.</p></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Production Need</th><th>Company</th><th>Agency Need</th><th>Projected Agency</th><th>Crusher Mode</th><th>Crusher Assigned</th></tr></thead><tbody>${daily.map(row => `<tr><td>${fmtDate(row.date, true)}</td><td><strong>${row.productionNeed}</strong></td><td>${row.companyAvailable}</td><td>${row.requiredAgency}</td><td>${row.projectedAgency}</td><td>${mandatoryModeLabel(row.crusherMode)}</td><td>${row.crusherAssigned}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
+
+function exportPublishedData() {
+  if (!state?.published) return toast('No published plan is available to export.', 'error');
+  const blob = new Blob([JSON.stringify(state.published, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `PWP_Published_Plan_${state.published.planStartDate}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+window.exportPublishedData = exportPublishedData;
 
 function renderPublished() {
   const container = $('publishedContainer');
@@ -695,7 +727,7 @@ function renderHistory() {
 }
 
 function openPeriodDialog(machineId, index = '') {
-  if (!isPlanner()) return;
+  if (!canWrite()) return toast('The application is read only.', 'error');
   const machine = state.machines.find(item => item.id === machineId);
   if (isCrusherMachine(machine)) return toast('Crusher is controlled by Mandatory/Floating mode, not production periods.', 'error');
   if (index === '' && plannedDays(machineId) >= PLAN_DAYS) return toast('This machine plan is already complete.', 'error');
@@ -724,7 +756,7 @@ function updatePeriodDialog() {
 }
 
 function savePeriod() {
-  if (!isPlanner()) return;
+  if (!canWrite()) return toast('The application is read only.', 'error');
   const id = $('periodMachineId').value;
   const index = $('periodIndex').value;
   const kind = $('periodKind').value;
@@ -746,14 +778,14 @@ function savePeriod() {
   renderAll();
 }
 
-function deleteSegment(id, index) { if (isPlanner()) { state.plans[id].splice(index, 1); markDirty(); renderAll(); } }
-function clearMachinePlan(id) { if (isPlanner() && confirm('Clear the full 14-day draft plan for this machine?')) { state.plans[id] = []; markDirty(); renderAll(); } }
-function fillStopped(id) { if (!isPlanner()) return; const remaining = PLAN_DAYS - plannedDays(id); if (remaining > 0) { state.plans[id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); markDirty(); renderAll(); } }
-function moveSegment(id, index, direction) { if (!isPlanner()) return; const periods = state.plans[id]; const destination = index + direction; if (destination < 0 || destination >= periods.length) return; [periods[index], periods[destination]] = [periods[destination], periods[index]]; markDirty(); renderAll(); }
+function deleteSegment(id, index) { if (canWrite()) { state.plans[id].splice(index, 1); markDirty(); renderAll(); } }
+function clearMachinePlan(id) { if (canWrite() && confirm('Clear the full 14-day draft plan for this machine?')) { state.plans[id] = []; markDirty(); renderAll(); } }
+function fillStopped(id) { if (!canWrite()) return; const remaining = PLAN_DAYS - plannedDays(id); if (remaining > 0) { state.plans[id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); markDirty(); renderAll(); } }
+function moveSegment(id, index, direction) { if (!canWrite()) return; const periods = state.plans[id]; const destination = index + direction; if (destination < 0 || destination >= periods.length) return; [periods[index], periods[destination]] = [periods[destination], periods[index]]; markDirty(); renderAll(); }
 Object.assign(window, { deleteSegment, clearMachinePlan, fillStopped, moveSegment });
 
 function openMachineDialog(id = '') {
-  if (!isPlanner()) return;
+  if (!canWrite()) return toast('The application is read only.', 'error');
   const machine = id ? state.machines.find(item => item.id === id) : null;
   $('machineOriginalId').value = id;
   $('machineDialogTitle').textContent = machine ? 'Edit Machine' : 'Add Machine';
@@ -766,7 +798,7 @@ function openMachineDialog(id = '') {
 window.openMachineDialog = openMachineDialog;
 
 function saveMachine() {
-  if (!isPlanner()) return;
+  if (!canWrite()) return toast('The application is read only.', 'error');
   const original = $('machineOriginalId').value.trim();
   const id = $('machineId').value.trim();
   const name = $('machineName').value.trim();
@@ -789,7 +821,7 @@ function saveMachine() {
 }
 
 function deleteMachine(id) {
-  if (!isPlanner() || !confirm(`Delete machine ${id} and its draft plan? Published plans and history will not be changed.`)) return;
+  if (!canWrite() || !confirm(`Delete machine ${id} and its draft plan? Published plans and history will not be changed.`)) return;
   state.machines = state.machines.filter(machine => machine.id !== id);
   delete state.plans[id];
   markDirty();
@@ -798,7 +830,7 @@ function deleteMachine(id) {
 window.deleteMachine = deleteMachine;
 
 async function handleExcelFile(file) {
-  if (!isPlanner()) return toast('You do not have permission to import Excel plans.', 'error');
+  if (!canWrite()) return toast('The application is read only.', 'error');
   if (!file || !/\.xlsx$/i.test(file.name)) return toast('Select an .xlsx file.', 'error');
   if (file.size > 5 * 1024 * 1024) return toast('Excel file must not exceed 5 MB.', 'error');
   $('importFileName').textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
@@ -849,7 +881,7 @@ function renderImportResult(result) {
 }
 
 function applyExcelImport() {
-  if (!isPlanner() || !pendingImport?.valid) return toast('A valid import preview is required.', 'error');
+  if (!canWrite() || !pendingImport?.valid) return toast('A valid import preview is required.', 'error');
   const mode = document.querySelector('input[name="importMode"]:checked')?.value;
   const newMachines = pendingImport.summary?.newMachines || [];
   const confirmations = [];
@@ -883,12 +915,12 @@ function renderUsers() {
     const role = user.role || '';
     const statusClass = user.disabled ? 'bad' : 'good';
     const statusLabel = user.disabled ? 'Disabled' : 'Active';
-    return `<tr><td><strong>${esc(user.displayName || '—')}</strong>${self ? '<span class="self-tag">You</span>' : ''}</td><td>${esc(user.email)}</td><td><select id="user-role-${esc(user.id)}" class="table-select" ${self ? 'disabled' : ''}><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option><option value="production_manager" ${role === 'production_manager' ? 'selected' : ''}>Production Manager</option><option value="hr" ${role === 'hr' ? 'selected' : ''}>HR</option></select></td><td><span class="badge ${statusClass}">${statusLabel}</span></td><td><button class="btn small secondary" onclick="saveUserRole('${esc(user.id)}')" ${self ? 'disabled' : ''}>Save Role</button> <button class="btn small ${user.disabled ? 'secondary' : 'danger'}" onclick="toggleUserDisabled('${esc(user.id)}',${!user.disabled})" ${self ? 'disabled' : ''}>${user.disabled ? 'Enable' : 'Disable'}</button></td></tr>`;
+    return `<tr><td><strong>${esc(user.displayName || '—')}</strong>${self ? '<span class="self-tag">You</span>' : ''}</td><td>${esc(user.email)}</td><td><select id="user-role-${esc(user.id)}" class="table-select" ${self || isPilotReadOnly() ? 'disabled' : ''}><option value="admin" ${role === 'admin' ? 'selected' : ''}>Admin</option><option value="production_manager" ${role === 'production_manager' ? 'selected' : ''}>Production Manager</option><option value="hr" ${role === 'hr' ? 'selected' : ''}>HR</option></select></td><td><span class="badge ${statusClass}">${statusLabel}</span></td><td><span class="write-control"><button class="btn small secondary" onclick="saveUserRole('${esc(user.id)}')" ${self ? 'disabled' : ''}>Save Role</button> <button class="btn small ${user.disabled ? 'secondary' : 'danger'}" onclick="toggleUserDisabled('${esc(user.id)}',${!user.disabled})" ${self ? 'disabled' : ''}>${user.disabled ? 'Enable' : 'Disable'}</button></span></td></tr>`;
   }).join('')}</tbody>`;
 }
 
 async function createUser() {
-  if (!isAdmin()) return;
+  if (!isAdmin() || !canWrite()) return toast('The application is read only.', 'error');
   const button = $('createUserBtn');
   $('userFormError').hidden = true;
   setButtonLoading(button, true, 'Creating…');
@@ -916,7 +948,7 @@ async function createUser() {
 }
 
 async function saveUserRole(id) {
-  if (!isAdmin()) return;
+  if (!isAdmin() || !canWrite()) return toast('The application is read only.', 'error');
   const role = $(`user-role-${id}`).value;
   try {
     await fetchJson(`/api/admin/users/${encodeURIComponent(id)}`, {
@@ -932,7 +964,7 @@ async function saveUserRole(id) {
 }
 
 async function toggleUserDisabled(id, disabled) {
-  if (!isAdmin()) return;
+  if (!isAdmin() || !canWrite()) return toast('The application is read only.', 'error');
   if (disabled && !confirm('Disable this user account?')) return;
   try {
     await fetchJson(`/api/admin/users/${encodeURIComponent(id)}`, {
@@ -964,19 +996,19 @@ document.addEventListener('DOMContentLoaded', () => {
   $('publishBtn')?.addEventListener('click', publishPlan);
   $('crusherFloatingBtn')?.addEventListener('click', () => setCrusherMode('floating'));
   $('crusherMandatoryBtn')?.addEventListener('click', () => setCrusherMode('mandatory'));
-  $('planStartDate')?.addEventListener('change', event => { if (isPlanner()) { state.planStartDate = event.target.value; markDirty(); renderAll(); } });
+  $('planStartDate')?.addEventListener('change', event => { if (canWrite()) { state.planStartDate = event.target.value; markDirty(); renderAll(); } });
   $('periodKind')?.addEventListener('change', updatePeriodDialog);
   $('periodSaveBtn')?.addEventListener('click', savePeriod);
   $('machineSaveBtn')?.addEventListener('click', saveMachine);
   $('addMachineBtn')?.addEventListener('click', () => openMachineDialog());
   $('fillAllStoppedBtn')?.addEventListener('click', () => {
-    if (!isPlanner()) return;
+    if (!canWrite()) return;
     state.machines.forEach(machine => { const remaining = PLAN_DAYS - plannedDays(machine.id); if (remaining > 0) state.plans[machine.id].push({ kind: 'stopped', product: 'Stopped', days: remaining, workers: 0 }); });
     markDirty(); renderAll();
   });
   $('settingsForm')?.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!isPlanner()) return;
+    if (!canWrite()) return;
     state.settings.companyWorkers = Number($('companyWorkers').value || 0);
     state.settings.currentAgency = Number($('currentAgency').value || 0);
     state.settings.requestNoticeDays = Number($('requestNoticeDays').value || 0);
@@ -987,7 +1019,7 @@ document.addEventListener('DOMContentLoaded', () => {
     markDirty(); renderAll();
     await saveDraft().catch(() => {});
   });
-  $('importExcelBtn')?.addEventListener('click', () => { if (isPlanner()) $('excelFileInput').click(); });
+  $('importExcelBtn')?.addEventListener('click', () => { if (canWrite()) $('excelFileInput').click(); });
   $('redistributeBtn')?.addEventListener('click', redistributeWorkforce);
   $('excelFileInput')?.addEventListener('change', event => handleExcelFile(event.target.files?.[0]));
   $('applyImportBtn')?.addEventListener('click', applyExcelImport);

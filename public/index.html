@@ -50,12 +50,14 @@
         </div>
         <div id="userBadge" class="user-badge"></div>
         <button id="themeToggle" class="btn theme-btn" title="Switch theme" aria-label="Switch theme">☾ Dark</button>
-        <button id="saveDraftBtn" class="btn secondary role-planner">Save</button>
-        <button id="publishBtn" class="btn primary role-planner">Publish Plan</button>
+        <button id="saveDraftBtn" class="btn secondary role-planner write-control">Save</button>
+        <button id="publishBtn" class="btn primary role-planner write-control">Publish Plan</button>
         <button id="changePasswordBtn" class="btn ghost" type="button">Change Password</button>
         <button id="logoutBtn" class="btn ghost">Sign Out</button>
       </div>
     </header>
+
+    <div id="pilotBanner" class="pilot-banner" role="status" hidden></div>
 
     <nav id="mainNav" class="tabs">
       <button class="tab role-planner active" data-tab="dashboard">Dashboard</button>
@@ -83,7 +85,7 @@
       <section id="tab-plan" class="tab-panel role-planner">
         <div class="section-head">
           <div><h2>14-Day Production Plan</h2><p>Add sequential production periods. No shifts and no man-days.</p></div>
-          <div class="section-actions">
+          <div class="section-actions write-control">
             <a id="downloadTemplateBtn" class="btn secondary" href="/assets/PWP_14_Day_Plan_Upload_Template.xlsx" download>Download Excel Template</a>
             <button id="importExcelBtn" class="btn primary" type="button">Import Excel Plan</button>
             <button id="redistributeBtn" class="btn secondary" type="button">Redistribute</button>
@@ -127,12 +129,12 @@
                   </div>
                   <small id="crusherModeHelp">Floating: production first; the Crusher runs only from actual surplus.</small>
                 </div>
-                <div class="form-actions"><button class="btn primary" type="submit">Save Settings</button></div>
+                <div class="form-actions write-control"><button class="btn primary" type="submit">Save Settings</button></div>
               </form>
             </div>
           </div>
           <div class="card">
-            <div class="card-head"><div><h3>Machines</h3><p>Crusher is intentionally not a normal production line.</p></div><button id="addMachineBtn" class="btn secondary">+ Add Machine</button></div>
+            <div class="card-head"><div><h3>Machines</h3><p>Crusher is intentionally not a normal production line.</p></div><button id="addMachineBtn" class="btn secondary write-control">+ Add Machine</button></div>
             <div class="table-wrap"><table id="machinesTable"></table></div>
           </div>
         </div>
@@ -146,7 +148,7 @@
       <section id="tab-admin" class="tab-panel role-admin" hidden>
         <div class="section-head">
           <div><h2>User Administration</h2><p>Create accounts, assign roles, and enable or disable access.</p></div>
-          <button id="addUserBtn" class="btn primary" type="button">+ Create User</button>
+          <button id="addUserBtn" class="btn primary write-control" type="button">+ Create User</button>
         </div>
         <div class="security-note"><strong>Secure role control:</strong> users cannot register themselves or promote themselves. Roles and account status are checked against MySQL on every protected request.</div>
         <div class="card"><div class="table-wrap"><table id="usersTable"></table></div></div>

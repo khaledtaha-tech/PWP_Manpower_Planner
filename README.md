@@ -47,7 +47,10 @@ Open `http://localhost:3000`.
 
 Copy `.env.example` to `.env` and set `DB_HOST`, `DB_USER`, `DB_PASSWORD`,
 `DB_NAME`, and a random `JWT_SECRET` containing at least 32 characters. `PORT` is
-optional. Never commit `.env`.
+optional. `PWP_PILOT_END_DATE` controls the last full-access day in Saudi time;
+after that date the server preserves all reads and exports but rejects every
+draft, publish, and user-management mutation until the date is extended. Never
+commit `.env`.
 
 ## Excel columns
 

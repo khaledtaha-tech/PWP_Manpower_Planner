@@ -11,6 +11,7 @@ const defaultAuthService = require('./auth');
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
+const DEFAULT_PILOT_END_DATE = '2026-10-29';
 
 const ROLES = Object.freeze({
   ADMIN: 'admin',
@@ -197,6 +198,31 @@ function roleLabel(role) {
   return ({ admin: 'Admin', production_manager: 'Production Manager', hr: 'HR' })[role] || role;
 }
 
+function getPilotStatus(endDate = process.env.PWP_PILOT_END_DATE || DEFAULT_PILOT_END_DATE, now = new Date()) {
+  const normalizedEndDate = String(endDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedEndDate)) {
+    throw new Error('PWP_PILOT_END_DATE must use YYYY-MM-DD format');
+  }
+  // The service is intended for Saudi Arabia, so the configured date remains
+  // fully active through 23:59:59 in Arabia Standard Time (UTC+03:00).
+  const expiresAt = new Date(`${normalizedEndDate}T23:59:59.999+03:00`);
+  if (Number.isNaN(expiresAt.getTime())) throw new Error('PWP_PILOT_END_DATE is invalid');
+  const current = now instanceof Date ? now : new Date(now);
+  const readOnly = current.getTime() > expiresAt.getTime();
+  return {
+    pilotEndDate: normalizedEndDate,
+    readOnly,
+    mode: readOnly ? 'read_only' : 'full_access',
+    daysRemaining: readOnly ? 0 : Math.max(0, Math.ceil((expiresAt.getTime() - current.getTime()) / 86400000))
+  };
+}
+
+function requireWritableService(service) {
+  if (service.readOnly) {
+    throw new HttpError(423, 'The pilot period has ended. The application is now read only; all saved data remains available.', 'PILOT_READ_ONLY');
+  }
+}
+
 async function requireRole(req, allowedRoles, authService) {
   const user = await authService.authenticate(req.headers.authorization);
   if (!allowedRoles.includes(user.role)) {
@@ -208,15 +234,18 @@ async function requireRole(req, allowedRoles, authService) {
 function createRequestHandler({
   repository = defaultRepository,
   authService = defaultAuthService,
-  database = pool
+  database = pool,
+  pilotEndDate = process.env.PWP_PILOT_END_DATE || DEFAULT_PILOT_END_DATE,
+  now = () => new Date()
 } = {}) {
   return async function requestHandler(req, res) {
     try {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const service = getPilotStatus(pilotEndDate, now());
 
     if (req.method === 'GET' && url.pathname === '/api/health') {
       await database.query('SELECT 1');
-      return sendJson(res, 200, { ok: true, app: 'PWP Manpower Planner (MySQL)', database: 'Connected' });
+      return sendJson(res, 200, { ok: true, app: 'PWP Manpower Planner (MySQL)', database: 'Connected', service });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/auth/login') {
@@ -227,7 +256,7 @@ function createRequestHandler({
 
     if (req.method === 'GET' && url.pathname === '/api/me') {
       const user = await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER, ROLES.HR], authService);
-      return sendJson(res, 200, { ...user, roleLabel: roleLabel(user.role) });
+      return sendJson(res, 200, { ...user, roleLabel: roleLabel(user.role), service });
     }
 
     if (req.method === 'PATCH' && url.pathname === '/api/me/password') {
@@ -252,6 +281,7 @@ function createRequestHandler({
 
     if (req.method === 'POST' && url.pathname === '/api/state') {
       await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER], authService);
+      requireWritableService(service);
       const incoming = await readBody(req);
       const current = await repository.getState();
       const draft = sanitizeDraftState(incoming, current);
@@ -261,6 +291,7 @@ function createRequestHandler({
 
     if (req.method === 'POST' && url.pathname === '/api/publish') {
       await requireRole(req, [ROLES.ADMIN, ROLES.PRODUCTION_MANAGER], authService);
+      requireWritableService(service);
       const published = await repository.publish(buildSnapshot);
       return sendJson(res, 200, { ok: true, published });
     }
@@ -279,6 +310,7 @@ function createRequestHandler({
 
     if (req.method === 'POST' && url.pathname === '/api/admin/users') {
       await requireRole(req, [ROLES.ADMIN], authService);
+      requireWritableService(service);
       const { email, password, displayName, role } = await readBody(req);
       const created = await authService.register(email, password, displayName, role);
       return sendJson(res, 201, created);
@@ -287,6 +319,7 @@ function createRequestHandler({
     const userMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
     if (req.method === 'PATCH' && userMatch) {
       const actor = await requireRole(req, [ROLES.ADMIN], authService);
+      requireWritableService(service);
       const userId = decodeURIComponent(userMatch[1]);
       await authService.updateUser(userId, await readBody(req), actor.id);
       return sendJson(res, 200, { ok: true });
@@ -369,4 +402,4 @@ function startServer() {
 // this module there. Start whenever this is not a Node test worker.
 if (!process.env.NODE_TEST_CONTEXT) startServer();
 
-module.exports = { createServer, createRequestHandler, HttpError, ROLES, sanitizeDraftState, buildSnapshot };
+module.exports = { createServer, createRequestHandler, HttpError, ROLES, sanitizeDraftState, buildSnapshot, getPilotStatus };

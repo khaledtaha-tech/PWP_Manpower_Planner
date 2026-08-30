@@ -63,10 +63,12 @@ function memoryRepository() {
   };
 }
 
-async function withServer(run) {
+async function withServer(run, dependencies = {}) {
   const server = createServer({
     authService: fakeAuth(), repository: memoryRepository(),
-    database: { async query() { return [[{ ok: 1 }]]; } }
+    database: { async query() { return [[{ ok: 1 }]]; } },
+    pilotEndDate: '2099-12-31',
+    ...dependencies
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -146,5 +148,31 @@ test('Admin can access all areas and cannot demote or disable self', async () =>
     const selfChange = await request(base, '/api/admin/users/admin-1', 'admin-token', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'hr' }) });
     assert.equal(selfChange.response.status, 400);
     assert.equal(selfChange.body.code, 'SELF_ADMIN_CHANGE_BLOCKED');
+  });
+});
+
+test('expired pilot remains readable but every business mutation is blocked by the server', async () => {
+  await withServer(async base => {
+    const profile = await request(base, '/api/me', 'admin-token');
+    assert.equal(profile.response.status, 200);
+    assert.equal(profile.body.service.readOnly, true);
+    assert.equal(profile.body.service.pilotEndDate, '2026-10-29');
+
+    assert.equal((await request(base, '/api/state', 'admin-token')).response.status, 200);
+    assert.equal((await request(base, '/api/published', 'hr-token')).response.status, 200);
+    assert.equal((await request(base, '/api/history', 'admin-token')).response.status, 200);
+    assert.equal((await request(base, '/api/admin/users', 'admin-token')).response.status, 200);
+    assert.equal((await request(base, '/api/me/password', 'admin-token', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: 'OldPass1', newPassword: 'NewPass1' }) })).response.status, 200);
+
+    const state = (await request(base, '/api/state', 'admin-token')).body;
+    const blockedSave = await request(base, '/api/state', 'admin-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state) });
+    assert.equal(blockedSave.response.status, 423);
+    assert.equal(blockedSave.body.code, 'PILOT_READ_ONLY');
+    assert.equal((await request(base, '/api/publish', 'pm-token', { method: 'POST' })).response.status, 423);
+    assert.equal((await request(base, '/api/admin/users', 'admin-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'new@example.com', password: 'StrongPass1', role: 'hr' }) })).response.status, 423);
+    assert.equal((await request(base, '/api/admin/users/hr-1', 'admin-token', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ disabled: true }) })).response.status, 423);
+  }, {
+    pilotEndDate: '2026-10-29',
+    now: () => new Date('2026-10-30T00:00:00+03:00')
   });
 });
