@@ -3,7 +3,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PWPExcel = api;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function createExcelImport() {
-  const HEADERS = ['Machine ID', 'Sequence', 'Status', 'Product', 'Duration', 'Workers/Day'];
+  const HEADERS = ['Line ID', 'Machine Name', 'Sequence', 'Status', 'Product', 'Duration', 'Workers/Day'];
+  const LEGACY_HEADERS = ['Machine ID', 'Sequence', 'Status', 'Product', 'Duration', 'Workers/Day'];
 
   function blank(value) {
     return value == null || String(value).trim() === '';
@@ -62,10 +63,15 @@
     return metadata;
   }
 
-  function isCrusher(machineId, machineMap, metadata) {
+  function isCrusher(machineId, machineName, machineMap, metadata) {
     const machine = machineMap.get(machineId) || metadata.get(machineId) || {};
-    const identity = `${machineId} ${machine.name || ''} ${machine.department || ''}`.toLowerCase();
+    const identity = `${machineId} ${machineName || ''} ${machine.name || ''} ${machine.department || ''}`.toLowerCase();
     return identity.includes('crusher');
+  }
+
+  function headerMatches(header, expected) {
+    return expected.every((value, index) => String(header[index] == null ? '' : header[index]).trim() === value)
+      && !header.slice(expected.length).some(value => !blank(value));
   }
 
   function validateWorkbook(workbook, machines) {
@@ -81,14 +87,19 @@
     const metadata = machineMetadata(workbook);
     const rows = worksheetRows(sheet);
     const header = rows[0] || [];
-    HEADERS.forEach((expected, index) => {
-      if (String(header[index] == null ? '' : header[index]).trim() !== expected) {
-        errors.push({ row: 1, reason: `Column ${index + 1} must be exactly "${expected}".` });
+    const legacyFormat = headerMatches(header, LEGACY_HEADERS);
+    const currentFormat = headerMatches(header, HEADERS);
+    if (!currentFormat && !legacyFormat) {
+      HEADERS.forEach((expected, index) => {
+        if (String(header[index] == null ? '' : header[index]).trim() !== expected) {
+          errors.push({ row: 1, reason: `Column ${index + 1} must be exactly "${expected}".` });
+        }
+      });
+      if (header.slice(HEADERS.length).some(value => !blank(value))) {
+        errors.push({ row: 1, reason: 'Plan sheet must contain only the seven required columns.' });
       }
-    });
-    if (header.slice(HEADERS.length).some(value => !blank(value))) {
-      errors.push({ row: 1, reason: 'Plan sheet must contain only the six required columns.' });
     }
+    const schemaLength = legacyFormat ? LEGACY_HEADERS.length : HEADERS.length;
 
     let lastDataIndex = rows.length - 1;
     while (lastDataIndex >= 1 && (rows[lastDataIndex] || []).every(blank)) lastDataIndex -= 1;
@@ -103,20 +114,30 @@
         errors.push({ row: rowNumber, reason: 'Blank rows are not allowed between plan rows.' });
         continue;
       }
-      if (source.slice(HEADERS.length).some(value => !blank(value))) {
+      if (source.slice(schemaLength).some(value => !blank(value))) {
         errors.push({ row: rowNumber, reason: 'Unexpected data exists after Workers/Day.' });
       }
 
       const machineId = String(source[0] == null ? '' : source[0]).trim();
-      const sequence = integer(source[1]);
-      const status = String(source[2] == null ? '' : source[2]).trim().toUpperCase();
-      const product = String(source[3] == null ? '' : source[3]).trim();
-      const duration = integer(source[4]);
-      const workers = integer(source[5]);
+      const knownMachine = machineMap.get(machineId) || metadata.get(machineId) || {};
+      const machineName = legacyFormat
+        ? String(knownMachine.name || machineId).trim()
+        : String(source[1] == null ? '' : source[1]).trim();
+      const offset = legacyFormat ? 0 : 1;
+      const sequence = integer(source[1 + offset]);
+      const status = String(source[2 + offset] == null ? '' : source[2 + offset]).trim().toUpperCase();
+      const product = String(source[3 + offset] == null ? '' : source[3 + offset]).trim();
+      const duration = integer(source[4 + offset]);
+      const workers = integer(source[5 + offset]);
 
-      if (!machineId) errors.push({ row: rowNumber, reason: 'Machine ID is required.' });
-      else if (!/^[A-Za-z0-9._-]+$/.test(machineId) || machineId.length > 30) errors.push({ row: rowNumber, reason: 'Machine ID may contain only letters, numbers, dot, dash or underscore (maximum 30 characters).' });
-      else if (isCrusher(machineId, machineMap, metadata)) errors.push({ row: rowNumber, reason: `Machine ID "${machineId}" is the Crusher. Do not add Crusher rows to Plan; use the Mandatory/Floating switch in the application.` });
+      if (!machineId) errors.push({ row: rowNumber, reason: 'Line ID is required.' });
+      else if (!/^[A-Za-z0-9._-]+$/.test(machineId) || machineId.length > 30) errors.push({ row: rowNumber, reason: 'Line ID may contain only letters, numbers, dot, dash or underscore (maximum 30 characters).' });
+      else if (isCrusher(machineId, machineName, machineMap, metadata)) errors.push({ row: rowNumber, reason: `Line ID "${machineId}" is the Crusher. Do not add Crusher rows to Plan; use the Mandatory/Floating switch in the application.` });
+      if (!legacyFormat && !machineName) errors.push({ row: rowNumber, reason: 'Machine Name is required.' });
+      else if (machineName.length > 100) errors.push({ row: rowNumber, reason: 'Machine Name must not exceed 100 characters.' });
+      else if (knownMachine.name && machineName && String(knownMachine.name).trim().toLowerCase() !== machineName.toLowerCase()) {
+        errors.push({ row: rowNumber, reason: `Machine Name "${machineName}" does not match Line ID "${machineId}" (${knownMachine.name}).` });
+      }
       if (sequence == null || sequence < 1) errors.push({ row: rowNumber, reason: 'Sequence must be a positive whole number starting from 1.' });
       if (status !== 'RUN' && status !== 'STOPPED') errors.push({ row: rowNumber, reason: 'Status must be RUN or STOPPED.' });
       if (status === 'RUN' && !product) errors.push({ row: rowNumber, reason: 'Product is required when Status is RUN.' });
@@ -124,14 +145,14 @@
       if (workers == null || workers < 0) errors.push({ row: rowNumber, reason: 'Workers/Day must be a non-negative whole number.' });
       if (status === 'STOPPED' && workers !== 0) errors.push({ row: rowNumber, reason: 'Workers/Day must be 0 when Status is STOPPED.' });
 
-      const signature = [machineId, sequence, status, product, duration, workers].join('\u001f');
+      const signature = [machineId, machineName, sequence, status, product, duration, workers].join('\u001f');
       if (signatures.has(signature)) {
         errors.push({ row: rowNumber, reason: `Duplicate of row ${signatures.get(signature)}.` });
       } else {
         signatures.set(signature, rowNumber);
       }
 
-      records.push({ machineId, sequence, status, product, duration, workers, sourceRow: rowNumber });
+      records.push({ machineId, machineName, sequence, status, product, duration, workers, sourceRow: rowNumber });
     }
 
     const grouped = new Map();
@@ -176,11 +197,12 @@
       .sort((a, b) => a.localeCompare(b))
       .map(machineId => {
         const listed = metadata.get(machineId) || {};
+        const planName = grouped.get(machineId)?.find(record => record.machineName)?.machineName || '';
         const firstRun = grouped.get(machineId)?.find(record => record.status === 'RUN' && record.product);
-        const crusher = /crusher/i.test(`${machineId} ${listed.name || ''} ${listed.department || ''}`);
+        const crusher = /crusher/i.test(`${machineId} ${planName} ${listed.name || ''} ${listed.department || ''}`);
         return {
           id: machineId,
-          name: listed.name || (crusher ? 'Crusher' : machineId),
+          name: listed.name || planName || (crusher ? 'Crusher' : machineId),
           department: listed.department || (crusher ? 'Crusher' : ''),
           defaultProduct: firstRun?.product || ''
         };
@@ -250,5 +272,5 @@
     return state;
   }
 
-  return { HEADERS, validateWorkbook, applyImportToDraft };
+  return { HEADERS, LEGACY_HEADERS, validateWorkbook, applyImportToDraft };
 }));

@@ -21,7 +21,7 @@ function defaultState() {
     planStartDate: new Date().toISOString().slice(0, 10),
     settings: {
       companyWorkers: 20,
-      currentAgency: 35,
+      currentAgency: 22,
       requestNoticeDays: 3,
       releaseNoticeDays: 3,
       crusherMode: 'floating',

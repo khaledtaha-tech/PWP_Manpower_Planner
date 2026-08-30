@@ -27,13 +27,21 @@ HOSTINGER
 EXCEL IMPORT
 ------------
 1. Download the Excel template from the 14-Day Plan screen.
-2. Fill the six Plan columns without renaming them.
+2. Fill the seven Plan columns without renaming them: Line ID, Machine Name,
+   Sequence, Status, Product, Duration and Workers/Day.
 3. Import and review validation, preview, and any New Machines count.
-4. Missing Machine IDs are added automatically; Lists supplies their names.
+4. Missing Line IDs are added automatically; Machine Name is shown to the
+   Production Manager and Lists supplies the remaining machine metadata.
 5. Do not add Crusher rows to Plan; control it with Floating/Mandatory mode.
 6. Floating is normal surplus-only operation; Mandatory is the exception.
 7. Choose Update or Replace, apply to Draft, then press Save.
 8. Import never publishes automatically.
+
+NOTICE LOGIC
+------------
+With a three-day notice, a decision issued on day 1 becomes effective on day 4.
+The target protects the highest Agency requirement across days 4, 5 and 6. The
+next review is day 4 for an action effective on day 7, and so on.
 
 READ NEXT
 ---------

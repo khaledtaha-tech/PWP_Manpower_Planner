@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const ExcelJS = require('exceljs');
 const path = require('node:path');
-const { validateWorkbook, applyImportToDraft, HEADERS } = require('../public/excel-import');
+const { validateWorkbook, applyImportToDraft, HEADERS, LEGACY_HEADERS } = require('../public/excel-import');
 
 const machines = [
   { id: 'L-01', name: 'Line 1' },
@@ -24,13 +24,17 @@ function workbook(rows, sheetName = 'Plan') {
   return book;
 }
 
+function planRow(machineId, machineName, sequence, status, product, duration, workers) {
+  return [machineId, machineName, sequence, status, product, duration, workers];
+}
+
 test('valid workbook supports multiple sequential RUN/STOPPED periods', () => {
   const result = validateWorkbook(workbook([
     HEADERS,
-    ['L-01', 1, 'RUN', 'HDPE 200 mm', 5, 3],
-    ['L-01', 2, 'STOPPED', '', 2, 0],
-    ['L-01', 3, 'RUN', 'HDPE 110 mm', 7, 2],
-    ['L-02', 1, 'RUN', 'PPR Pipe', 14, 3]
+    planRow('L-01', 'Line 1', 1, 'RUN', 'HDPE 200 mm', 5, 3),
+    planRow('L-01', 'Line 1', 2, 'STOPPED', '', 2, 0),
+    planRow('L-01', 'Line 1', 3, 'RUN', 'HDPE 110 mm', 7, 2),
+    planRow('L-02', 'Line 2', 1, 'RUN', 'PPR Pipe', 14, 3)
   ]), machines);
   assert.equal(result.valid, true);
   assert.equal(result.summary.machines, 2);
@@ -43,10 +47,10 @@ test('downloadable project template contains the required sheets and imports suc
   const templatePath = path.join(__dirname, '..', 'public', 'assets', 'PWP_14_Day_Plan_Upload_Template.xlsx');
   const template = new ExcelJS.Workbook();
   await template.xlsx.readFile(templatePath);
-  assert.deepEqual(template.worksheets.map(sheet => sheet.name), ['Plan', 'Instructions', 'Lists', 'Scenario Comparison', 'Mandatory Crusher', 'Floating Crusher']);
+  assert.deepEqual(template.worksheets.map(sheet => sheet.name), ['Instructions', 'Plan', 'Production Need', 'Lists', 'Scenario Comparison', 'Mandatory Crusher', 'Floating Crusher']);
   const result = validateWorkbook(template, factoryMachines);
   assert.equal(result.valid, true);
-  assert.equal(result.summary.rows, 17);
+  assert.equal(result.summary.rows, 60);
   assert.equal(result.summary.machines, 12);
   assert.deepEqual(result.summary.newMachines, []);
   assert.equal(result.records.some(record => record.machineId === 'L-13'), false);
@@ -55,15 +59,15 @@ test('downloadable project template contains the required sheets and imports suc
 test('validator returns all row-specific errors without applying anything', () => {
   const result = validateWorkbook(workbook([
     HEADERS,
-    ['BAD ID', 2, 'RUN', '', 15, -1],
-    ['L-01', 1, 'STOPPED', '', 5, 2],
-    ['L-01', 1, 'RUN', 'Pipe', 10, 3],
+    planRow('BAD ID', 'Bad Line', 2, 'RUN', '', 15, -1),
+    planRow('L-01', 'Line 1', 1, 'STOPPED', '', 5, 2),
+    planRow('L-01', 'Line 1', 1, 'RUN', 'Pipe', 10, 3),
     [],
-    ['L-01', 3, 'BAD', 'Pipe', 5.5, 1.5]
+    planRow('L-01', 'Line 1', 3, 'BAD', 'Pipe', 5.5, 1.5)
   ]), machines);
   assert.equal(result.valid, false);
   assert.ok(result.errors.length >= 9);
-  assert.ok(result.errors.some(error => error.row === 2 && error.reason.includes('Machine ID may contain')));
+  assert.ok(result.errors.some(error => error.row === 2 && error.reason.includes('Line ID may contain')));
   assert.ok(result.errors.some(error => error.row === 3 && error.reason.includes('must be 0')));
   assert.ok(result.errors.some(error => error.row === 4 && error.reason.includes('duplicated')));
   assert.ok(result.errors.some(error => error.row === 5 && error.reason.includes('Blank rows')));
@@ -73,7 +77,7 @@ test('validator returns all row-specific errors without applying anything', () =
 test('unknown valid machine IDs are previewed and created automatically from Lists metadata', () => {
   const book = workbook([
     HEADERS,
-    ['L-14', 1, 'RUN', 'New Production', 14, 2]
+    planRow('L-14', 'New Line', 1, 'RUN', 'New Production', 14, 2)
   ]);
   const lists = book.addWorksheet('Lists');
   lists.addRow(['Status', '', 'Machine ID', 'Machine Name', 'Department']);
@@ -99,7 +103,7 @@ test('unknown valid machine IDs are previewed and created automatically from Lis
 test('Crusher rows are rejected because Crusher is controlled by application mode', () => {
   const book = workbook([
     HEADERS,
-    ['L-13', 1, 'RUN', 'Crushing / Support', 14, 2]
+    planRow('L-13', 'Crusher', 1, 'RUN', 'Crushing / Support', 14, 2)
   ]);
   const result = validateWorkbook(book, factoryMachines);
   assert.equal(result.valid, false);
@@ -110,7 +114,7 @@ test('missing Plan sheet and wrong headers are rejected', () => {
   const missing = validateWorkbook(workbook([HEADERS], 'Other'), machines);
   assert.equal(missing.valid, false);
   assert.ok(missing.errors[0].reason.includes('Plan'));
-  const wrong = validateWorkbook(workbook([['Machine', ...HEADERS.slice(1)], ['L-01', 1, 'RUN', 'Pipe', 14, 3]]), machines);
+  const wrong = validateWorkbook(workbook([['Machine', ...HEADERS.slice(1)], planRow('L-01', 'Line 1', 1, 'RUN', 'Pipe', 14, 3)]), machines);
   assert.equal(wrong.valid, false);
   assert.ok(wrong.errors.some(error => error.row === 1));
 });
@@ -131,11 +135,20 @@ function draftState() {
   };
 }
 
+test('legacy six-column Plan files remain importable', () => {
+  const result = validateWorkbook(workbook([
+    LEGACY_HEADERS,
+    ['L-01', 1, 'RUN', 'Legacy Pipe', 14, 3]
+  ]), machines);
+  assert.equal(result.valid, true);
+  assert.equal(result.records[0].machineName, 'Line 1');
+});
+
 function validImport() {
   return validateWorkbook(workbook([
     HEADERS,
-    ['L-01', 1, 'RUN', 'New Product', 10, 4],
-    ['L-01', 2, 'STOPPED', '', 4, 0]
+    planRow('L-01', 'Line 1', 1, 'RUN', 'New Product', 10, 4),
+    planRow('L-01', 'Line 1', 2, 'STOPPED', '', 4, 0)
   ]), machines);
 }
 

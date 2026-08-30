@@ -15,6 +15,11 @@ published snapshots in MySQL. Authentication uses bcrypt password hashes and JWT
   the exceptional mode and reserves at least two workers even when Agency labor
   must be requested or retained.
 - Excel validation, preview and Update/Replace modes.
+- The current template uses `Line ID` and `Machine Name` together, while legacy
+  six-column files remain supported.
+- Request/release decisions use the notice period as a rolling protection window:
+  an action effective after three days protects the highest need in the following
+  three-day block.
 - Imported machine IDs that do not yet exist are added automatically. Names and
   departments are read from the optional `Lists` sheet when available.
 - Every publish creates a permanent snapshot in MySQL `history`.
@@ -46,10 +51,12 @@ optional. Never commit `.env`.
 
 ## Excel columns
 
-The `Plan` sheet must contain exactly: `Machine ID`, `Sequence`, `Status`,
-`Product`, `Duration`, and `Workers/Day`. Status is `RUN` or `STOPPED`; sequences
-start at 1 per machine; total duration per machine cannot exceed 14 days; stopped
-periods use zero workers.
+The current `Plan` sheet contains exactly: `Line ID`, `Machine Name`, `Sequence`,
+`Status`, `Product`, `Duration`, and `Workers/Day`. Status is `RUN` or `STOPPED`;
+sequences start at 1 per line; total duration per line cannot exceed 14 days;
+stopped periods use zero workers. The importer validates that each machine name
+matches its Line ID. Older six-column files beginning with `Machine ID` are still
+accepted for backward compatibility.
 
 Crusher machines such as `L-13` remain in the machine master and `Lists` metadata,
 but must not be entered as production rows in `Plan`. Crusher allocation is

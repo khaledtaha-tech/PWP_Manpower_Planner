@@ -115,3 +115,35 @@ test('Three-day notice produces two releases and one request in Floating mode', 
   ]);
   assert.deepEqual(Array.from(result.daily.slice(0, 4), row => row.crusherAssigned), [2, 2, 2, 0]);
 });
+
+function workbookScenario(crusherMode) {
+  const productionNeed = [40, 36, 37, 34, 37, 36, 33, 33, 34, 37, 37, 37, 37, 36];
+  return {
+    planStartDate: '2026-08-12',
+    settings: { companyWorkers: 20, currentAgency: 22, crusherMode, crusherWorkers: 2, floatingLimit: 2, minReleaseDuration: 3, requestNoticeDays: 3, releaseNoticeDays: 3 },
+    machines: [{ id: 'L-01', name: 'Combined Production Need', department: 'Production' }],
+    plans: { 'L-01': productionNeed.map((workers, index) => ({ kind: 'run', product: `Day ${index + 1}`, days: 1, workers })) }
+  };
+}
+
+test('new Excel scenario matches Floating decisions exactly', () => {
+  const { buildActions } = loadEngine();
+  const result = buildActions(workbookScenario('floating'));
+  assert.deepEqual(Array.from(result.actions, action => [action.type, action.qty, action.from, action.to, action.noticeDayIndex, action.dayIndex]), [
+    ['RELEASE', 5, 22, 17, 0, 3],
+    ['RELEASE', 3, 17, 14, 3, 6],
+    ['REQUEST', 3, 14, 17, 6, 9]
+  ]);
+  assert.deepEqual(Array.from(result.daily, row => row.projectedAgency), [22, 22, 22, 17, 17, 17, 14, 14, 14, 17, 17, 17, 17, 17]);
+});
+
+test('new Excel scenario matches Mandatory decisions exactly', () => {
+  const { buildActions } = loadEngine();
+  const result = buildActions(workbookScenario('mandatory'));
+  assert.deepEqual(Array.from(result.actions, action => [action.type, action.qty, action.from, action.to, action.noticeDayIndex, action.dayIndex]), [
+    ['RELEASE', 3, 22, 19, 0, 3],
+    ['RELEASE', 3, 19, 16, 3, 6],
+    ['REQUEST', 3, 16, 19, 6, 9]
+  ]);
+  assert.equal(result.daily.every(row => row.crusherAssigned === 2), true);
+});

@@ -6,6 +6,7 @@ node_modules/
 data/local-state.json
 data/local-history.json
 data/*.tmp
+outputs/
 serviceAccount*.json
 *service-account*.json
 firebase-adminsdk*.json

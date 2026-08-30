@@ -430,6 +430,10 @@ function buildActions(source = state) {
   const mandatory = settings.crusherMode === 'mandatory';
   const crusherWorkers = Number(settings.crusherWorkers || 0);
   const minimumRelease = Math.max(1, Number(settings.minReleaseDuration || 1));
+  const requestNotice = Math.max(0, Number(settings.requestNoticeDays || 0));
+  const releaseNotice = Math.max(0, Number(settings.releaseNoticeDays || 0));
+  const positiveNotices = [requestNotice, releaseNotice].filter(days => days > 0);
+  const decisionInterval = positiveNotices.length ? Math.min(...positiveNotices) : 1;
   let level = Number(settings.currentAgency || 0);
   const actions = [];
   daily.forEach(row => {
@@ -438,30 +442,47 @@ function buildActions(source = state) {
       : row.agencyNeed;
   });
 
-  for (let index = 0; index < daily.length; index += 1) {
-    const target = daily[index].requiredAgency;
-    if (target > level) {
-      const notice = Number(settings.requestNoticeDays || 0);
-      const previousTarget = index ? daily[index - 1].requiredAgency : level;
-      if (index === 0 || target !== previousTarget) {
-        const quantity = target - level;
-        actions.push({ type: 'REQUEST', qty: quantity, from: level, to: target, dayIndex: index, effective: daily[index].date, noticeBy: addDays(daily[index].date, -notice), reason: mandatory ? `Production and mandatory Crusher require ${target} Agency workers` : `Production need rises to ${target} Agency workers` });
-        level = target;
-      }
+  function protectedTarget(effectiveIndex, windowDays) {
+    if (effectiveIndex < 0 || effectiveIndex >= daily.length) return null;
+    const protectedRows = daily.slice(effectiveIndex, Math.min(daily.length, effectiveIndex + Math.max(1, windowDays)));
+    return Math.max(...protectedRows.map(row => row.requiredAgency), 0);
+  }
+
+  for (let noticeIndex = 0; noticeIndex < daily.length; noticeIndex += decisionInterval) {
+    const requestEffectiveIndex = noticeIndex + requestNotice;
+    const releaseEffectiveIndex = noticeIndex + releaseNotice;
+    const requestWindow = Math.max(1, requestNotice || decisionInterval);
+    const releaseWindow = Math.max(minimumRelease, releaseNotice || decisionInterval);
+    const requestTarget = protectedTarget(requestEffectiveIndex, requestWindow);
+    const releaseTarget = protectedTarget(releaseEffectiveIndex, releaseWindow);
+
+    if (requestTarget != null && requestTarget > level) {
+      const quantity = requestTarget - level;
+      const protectedThrough = Math.min(daily.length - 1, requestEffectiveIndex + requestWindow - 1);
+      actions.push({
+        type: 'REQUEST', qty: quantity, from: level, to: requestTarget,
+        dayIndex: requestEffectiveIndex, noticeDayIndex: noticeIndex,
+        effective: daily[requestEffectiveIndex].date, noticeBy: daily[noticeIndex].date,
+        reason: mandatory
+          ? `Highest protected need is ${requestTarget} Agency workers including ${crusherWorkers} mandatory Crusher workers through ${daily[protectedThrough].date}`
+          : `Highest protected production need is ${requestTarget} Agency workers through ${daily[protectedThrough].date}`
+      });
+      level = requestTarget;
       continue;
     }
-    if (target >= level) continue;
-    const notice = Number(settings.releaseNoticeDays || 0);
-    if (index < notice || index >= PLAN_DAYS - notice) continue;
-    const previousTarget = index ? daily[index - 1].requiredAgency : Number(settings.currentAgency || 0);
-    if (target === previousTarget) continue;
-    const remainingAtTarget = daily.slice(index).findIndex(row => row.requiredAgency > target);
-    const duration = remainingAtTarget === -1 ? daily.length - index : remainingAtTarget;
-    if (duration < minimumRelease) continue;
-    const quantity = level - target;
-    if (quantity > 0) {
-      actions.push({ type: 'RELEASE', qty: quantity, from: level, to: target, dayIndex: index, effective: daily[index].date, noticeBy: addDays(daily[index].date, -notice), reason: mandatory ? `Lower requirement still covers production and ${crusherWorkers} mandatory Crusher workers for ${duration} days` : `Production surplus remains for ${duration} days; Floating Crusher does not prevent release` });
-      level = target;
+
+    if (releaseTarget != null && releaseTarget < level) {
+      const quantity = level - releaseTarget;
+      const protectedThrough = Math.min(daily.length - 1, releaseEffectiveIndex + releaseWindow - 1);
+      actions.push({
+        type: 'RELEASE', qty: quantity, from: level, to: releaseTarget,
+        dayIndex: releaseEffectiveIndex, noticeDayIndex: noticeIndex,
+        effective: daily[releaseEffectiveIndex].date, noticeBy: daily[noticeIndex].date,
+        reason: mandatory
+          ? `Release still protects production and ${crusherWorkers} mandatory Crusher workers through ${daily[protectedThrough].date}`
+          : `Release protects the highest production need through ${daily[protectedThrough].date}; Floating Crusher does not retain Agency workers`
+      });
+      level = releaseTarget;
     }
   }
   const projected = [];
@@ -821,7 +842,7 @@ function renderImportResult(result) {
   $('importSummary').innerHTML = [
     ['Machines', summary.machines], ['New Machines', newMachineCount], ['Plan Rows', summary.rows], ['RUN Periods', summary.runPeriods], ['STOPPED Periods', summary.stoppedPeriods], ['Total Planned Days', summary.runDays + summary.stoppedDays]
   ].map(([label, value]) => `<div><span>${esc(label)}</span><strong>${value}</strong></div>`).join('');
-  $('importPreviewTable').innerHTML = `<thead><tr><th>Machine ID</th><th>Sequence</th><th>Status</th><th>Product</th><th>Duration</th><th>Workers/Day</th></tr></thead><tbody>${result.records.map(record => `<tr><td><strong>${esc(record.machineId)}</strong></td><td>${record.sequence}</td><td><span class="badge ${record.status === 'RUN' ? 'good' : 'info'}">${record.status}</span></td><td>${esc(record.product || '—')}</td><td>${record.duration}</td><td>${record.workers}</td></tr>`).join('')}</tbody>`;
+  $('importPreviewTable').innerHTML = `<thead><tr><th>Line ID</th><th>Machine Name</th><th>Sequence</th><th>Status</th><th>Product</th><th>Duration</th><th>Workers/Day</th></tr></thead><tbody>${result.records.map(record => `<tr><td><strong>${esc(record.machineId)}</strong></td><td>${esc(record.machineName || '—')}</td><td>${record.sequence}</td><td><span class="badge ${record.status === 'RUN' ? 'good' : 'info'}">${record.status}</span></td><td>${esc(record.product || '—')}</td><td>${record.duration}</td><td>${record.workers}</td></tr>`).join('')}</tbody>`;
   $('importPreview').hidden = false;
   $('importModePanel').hidden = false;
   $('applyImportBtn').disabled = false;
