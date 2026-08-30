@@ -175,11 +175,14 @@ function renderPilotAccess() {
   const banner = $('pilotBanner');
   if (!banner || !serviceAccess?.pilotEndDate) return;
   const endDate = fmtDate(serviceAccess.pilotEndDate);
-  banner.hidden = false;
+  const showNotice = isPilotReadOnly() || Number(serviceAccess.daysRemaining) <= 7;
+  banner.hidden = !showNotice;
   banner.classList.toggle('expired', isPilotReadOnly());
-  banner.innerHTML = isPilotReadOnly()
-    ? `<strong>Pilot period ended · Read-only access</strong><span>Editing and publishing are disabled. Saved and published data remain available.</span>`
-    : `<strong>Pilot access · ${serviceAccess.daysRemaining} day${serviceAccess.daysRemaining === 1 ? '' : 's'} remaining</strong><span>Full access is active through ${esc(endDate)}.</span>`;
+  banner.innerHTML = showNotice
+    ? isPilotReadOnly()
+      ? `<strong>Pilot period ended · Read-only access</strong><span>Editing and publishing are disabled. Saved and published data remain available.</span>`
+      : `<strong>Pilot access ends soon · ${serviceAccess.daysRemaining} day${serviceAccess.daysRemaining === 1 ? '' : 's'} remaining</strong><span>Full access is active through ${esc(endDate)}.</span>`
+    : '';
   document.body.classList.toggle('pilot-readonly', isPilotReadOnly());
   document.querySelectorAll('.write-control').forEach(element => { element.hidden = !canWrite(); });
   document.querySelectorAll('#settingsForm input, #settingsForm button, #planStartDate').forEach(element => { element.disabled = !canWrite(); });
