@@ -36,6 +36,12 @@ test('planning screen includes the manual Redistribute action', () => {
   assert.match(app, /function redistributeWorkforce\(\)/);
 });
 
+test('Excel import accepts standard and macro-enabled Open XML workbooks', () => {
+  assert.match(html, /id="excelFileInput"[^>]*accept="\.xlsx,\.xlsm"/);
+  assert.match(app, /\\\.\(xlsx\|xlsm\)\$/);
+  assert.ok(app.includes('Select an .xlsx or .xlsm file.'));
+});
+
 test('authentication UI matches local MySQL and JWT capabilities', () => {
   assert.ok(app.includes("localStorage.getItem('pwp_token')"));
   assert.ok(!html.includes('Continue with Google'));
