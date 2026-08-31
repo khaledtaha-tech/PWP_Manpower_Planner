@@ -114,3 +114,32 @@ test('publishing uses metadata columns when the current history schema provides 
     delete require.cache[require.resolve('../repository')];
   }
 });
+
+test('publishing supplies a unique id for legacy text primary keys', async () => {
+  const originalQuery = pool.query;
+  const state = { planStartDate: '2026-08-29', settings: {}, machines: [], plans: {} };
+  const writes = [];
+  pool.query = async (sql, parameters) => {
+    if (sql.startsWith('SELECT data FROM app_state')) return [[{ data: state }]];
+    if (sql === 'SHOW COLUMNS FROM history') {
+      return [[
+        { Field: 'id', Type: 'varchar(64)', Null: 'NO', Key: 'PRI', Default: '', Extra: '' },
+        { Field: 'data', Type: 'json', Null: 'NO', Extra: '' },
+        { Field: 'created_at', Type: 'timestamp', Null: 'NO', Extra: '' }
+      ]];
+    }
+    writes.push({ sql, parameters });
+    return [{ affectedRows: 1 }];
+  };
+  delete require.cache[require.resolve('../repository')];
+  const repository = require('../repository');
+  try {
+    await repository.publish(current => ({ ...current, id: 'PUB-UNIQUE' }));
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].sql, 'INSERT INTO history (id, data) VALUES (?, ?)');
+    assert.equal(writes[0].parameters[0], 'PUB-UNIQUE');
+  } finally {
+    pool.query = originalQuery;
+    delete require.cache[require.resolve('../repository')];
+  }
+});
