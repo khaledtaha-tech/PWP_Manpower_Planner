@@ -91,6 +91,7 @@ const repository = {
     const json = JSON.stringify(snapshot);
     const [columnRows] = await pool.query('SHOW COLUMNS FROM history');
     const columns = new Set(columnRows.map(column => String(column.Field || column.COLUMN_NAME || '').toLowerCase()));
+    const idColumn = columnRows.find(column => String(column.Field || column.COLUMN_NAME || '').toLowerCase() === 'id');
     if (!columns.has('data')) {
       throw new Error('The history table must contain a data column');
     }
@@ -99,6 +100,15 @@ const repository = {
     // (id, data, created_at). New installations also store searchable metadata.
     const insertColumns = [];
     const values = [];
+    // Some early Hostinger installations used a text PRIMARY KEY with an
+    // empty default instead of AUTO_INCREMENT. Supply the snapshot id for
+    // that schema so repeated publishes never collide on an empty key.
+    const idExtraIsKnown = idColumn && Object.prototype.hasOwnProperty.call(idColumn, 'Extra');
+    const idIsAutoIncrement = String(idColumn?.Extra || '').toLowerCase().includes('auto_increment');
+    if (idExtraIsKnown && !idIsAutoIncrement) {
+      insertColumns.push('id');
+      values.push(snapshot.id);
+    }
     if (columns.has('snapshot_id')) {
       insertColumns.push('snapshot_id');
       values.push(snapshot.id);
