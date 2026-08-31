@@ -834,7 +834,7 @@ window.deleteMachine = deleteMachine;
 
 async function handleExcelFile(file) {
   if (!canWrite()) return toast('The application is read only.', 'error');
-  if (!file || !/\.xlsx$/i.test(file.name)) return toast('Select an .xlsx file.', 'error');
+  if (!file || !/\.(xlsx|xlsm)$/i.test(file.name)) return toast('Select an .xlsx or .xlsm file.', 'error');
   if (file.size > 5 * 1024 * 1024) return toast('Excel file must not exceed 5 MB.', 'error');
   $('importFileName').textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
   $('importStatus').className = 'import-status loading';
